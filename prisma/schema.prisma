@@ -1,0 +1,243 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum TicketSystem {
+  SUPPORT_ORACLE
+  BUG_ORACLE
+  JIRA
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+  BLOCKER
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum PollingStatus {
+  ACTIVE
+  PAUSED
+  FAILED
+}
+
+enum DigestFrequency {
+  IMMEDIATE
+  DAILY
+  WEEKLY
+  DISABLED
+}
+
+model User {
+  id                      String                   @id @default(cuid())
+  name                    String?
+  email                   String                   @unique
+  emailVerified           DateTime?
+  image                   String?
+  passwordHash            String?
+  role                    Role                     @default(USER)
+  accounts                Account[]
+  sessions                Session[]
+  externalCredentials     ExternalCredential[]
+  tickets                 TrackedTicket[]
+  notificationPreference  NotificationPreference?
+  weeklyReports           WeeklyReport[]
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+
+  @@index([role])
+  @@index([createdAt])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model ExternalCredential {
+  id                    String       @id @default(cuid())
+  userId                String
+  system                TicketSystem
+  providerAccountId     String?
+  encryptedAccessToken  String?
+  encryptedRefreshToken String?
+  tokenExpiresAt        DateTime?
+  scopes                String[]     @default([])
+  metadata              Json?
+  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@unique([userId, system])
+  @@index([system])
+}
+
+model TrackedTicket {
+  id              String           @id @default(cuid())
+  ownerId         String
+  supportTicketId String?
+  bugId           String?
+  jiraId          String?
+  title           String?
+  notes           String?
+  priority        TicketPriority   @default(MEDIUM)
+  status          String           @default("UNKNOWN")
+  assignee        String?
+  resolution      String?
+  slaDueAt        DateTime?
+  dueDate         DateTime?
+  currentRisk     RiskLevel        @default(LOW)
+  lastSyncedAt    DateTime?
+  externalLinks   Json?
+  owner           User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  snapshots       TicketSnapshot[]
+  events          TicketEvent[]
+  pollingJobs     PollingJob[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([ownerId, updatedAt])
+  @@index([supportTicketId])
+  @@index([bugId])
+  @@index([jiraId])
+  @@index([status])
+  @@index([priority])
+  @@index([currentRisk])
+}
+
+model TicketSnapshot {
+  id           String        @id @default(cuid())
+  ticketId     String
+  system       TicketSystem
+  payload      Json
+  normalized   Json
+  status       String?
+  priority     String?
+  assignee     String?
+  resolution   String?
+  commentsHash String?
+  slaDueAt     DateTime?
+  dueDate      DateTime?
+  fetchedAt    DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+  ticket       TrackedTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, system, fetchedAt])
+  @@index([system, fetchedAt])
+}
+
+model TicketEvent {
+  id            String        @id @default(cuid())
+  ticketId      String
+  system        TicketSystem?
+  eventType     String
+  changedField  String
+  previousValue String?
+  newValue      String?
+  message       String
+  metadata      Json?
+  createdAt     DateTime      @default(now())
+  ticket        TrackedTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@index([eventType])
+  @@index([system])
+}
+
+model NotificationPreference {
+  id                 String          @id @default(cuid())
+  userId             String          @unique
+  frequency          DigestFrequency @default(IMMEDIATE)
+  immediateAlerts    Boolean         @default(true)
+  dailyDigest        Boolean         @default(false)
+  weeklyDigest       Boolean         @default(true)
+  emailNotifications Boolean         @default(true)
+  slackNotifications Boolean         @default(false)
+  email              String?
+  slackWebhookUrl    String?
+  mutedFields        String[]        @default([])
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+}
+
+model PollingJob {
+  id              String        @id @default(cuid())
+  ticketId        String
+  jobKey          String        @unique
+  intervalMinutes Int           @default(30)
+  status          PollingStatus @default(ACTIVE)
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
+  errorMessage    String?
+  ticket          TrackedTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([ticketId])
+  @@index([status, nextRunAt])
+}
+
+model WeeklyReport {
+  id        String   @id @default(cuid())
+  userId    String
+  weekStart DateTime
+  weekEnd   DateTime
+  summary   Json
+  html      String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, weekStart])
+  @@index([weekStart, weekEnd])
+}

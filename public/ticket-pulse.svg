@@ -1,0 +1,6 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ticket Pulse">
+  <rect x="8" y="10" width="80" height="76" rx="8" fill="#0EA5E9"/>
+  <path d="M20 30H76" stroke="white" stroke-width="6" stroke-linecap="round"/>
+  <path d="M20 48H42L50 36L58 60L66 48H76" stroke="#FACC15" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M20 68H58" stroke="white" stroke-width="6" stroke-linecap="round"/>
+</svg>
