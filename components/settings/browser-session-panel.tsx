@@ -11,6 +11,8 @@ type BrowserSessionState = {
   exists: boolean;
   mode: "headed" | "headless";
   browserHint: string;
+  connectionMode: "existing-edge" | "managed-profile";
+  cdpUrl?: string;
 };
 
 export function BrowserSessionPanel() {
@@ -37,13 +39,15 @@ export function BrowserSessionPanel() {
     }
 
     setSession(payload.session);
-    toast.success("Oracle browser opened. Complete SSO in the browser window.");
+    toast.success("Edge session connected. Ticket Pulse will reuse your saved Oracle login.");
     window.setTimeout(() => void loadSession(), 1500);
   }
 
   useEffect(() => {
     void loadSession();
   }, []);
+
+  const usesExistingEdge = session?.connectionMode === "existing-edge";
 
   return (
     <Card>
@@ -53,16 +57,19 @@ export function BrowserSessionPanel() {
         </div>
         <CardTitle>Local browser tracker</CardTitle>
         <CardDescription>
-          Opens Oracle Support, Jira, and Bug Oracle in a persistent local browser profile so scheduled checks can reuse your unified login session.
+          Attaches to Microsoft Edge so scheduled checks can reuse your saved Oracle unified login session.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="rounded-lg border bg-background p-3 text-sm">
-          <p className="font-medium">Session profile</p>
-          <p className="mt-1 break-all text-muted-foreground">{session?.profileDir ?? "Not checked yet"}</p>
-          <p className="mt-2 text-muted-foreground">
-            Status: {session?.exists ? "Profile exists" : "Profile not created"} / {session?.mode ?? "headed"}
+          <p className="font-medium">Session source</p>
+          <p className="mt-1 break-all text-muted-foreground">
+            {usesExistingEdge ? session?.cdpUrl ?? "Existing Edge window" : session?.profileDir ?? "Not checked yet"}
           </p>
+          <p className="mt-2 text-muted-foreground">
+            Status: {usesExistingEdge ? "Existing Edge attach" : session?.exists ? "Profile exists" : "Profile not created"} / {session?.mode ?? "headed"}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">Browser: {session?.browserHint ?? "Microsoft Edge"}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button onClick={connectSession} disabled={loading}>

@@ -1,10 +1,10 @@
-﻿import type { Prisma, TicketPriority, TicketSystem } from "@prisma/client";
+import type { Prisma, TicketPriority, TicketSystem } from "@prisma/client";
 import type { BrowserContext } from "playwright";
 import { buildExternalLinks, buildExternalLinksJson } from "@/lib/external-links";
 import { prisma } from "@/lib/prisma";
 import { daysBetween } from "@/lib/utils";
 import { pageToExternalTicket, BrowserSsoRequiredError } from "@/services/browser-tracker/parser";
-import { launchPersistentOracleContext } from "@/services/browser-tracker/session";
+import { openOracleBrowserConnection } from "@/services/browser-tracker/session";
 import { detectTicketChanges, type TicketChange } from "@/services/change-detection";
 import { hashComments } from "@/services/integrations/hash";
 import type { NormalizedTicket } from "@/services/integrations/types";
@@ -18,11 +18,11 @@ type LinkedBrowserTarget = {
 };
 
 export async function refreshTrackedTicketWithBrowser(ticketId: string) {
-  const context = await launchPersistentOracleContext({ headless: process.env.BROWSER_HEADLESS === "true" });
+  const connection = await openOracleBrowserConnection({ headless: process.env.BROWSER_HEADLESS === "true" });
   try {
-    return await refreshTrackedTicketWithBrowserContext(ticketId, context);
+    return await refreshTrackedTicketWithBrowserContext(ticketId, connection.context);
   } finally {
-    await context.close();
+    await connection.close();
   }
 }
 
@@ -40,13 +40,13 @@ export async function refreshDueBrowserJobs(limit = 10) {
     return [];
   }
 
-  const context = await launchPersistentOracleContext({ headless: process.env.BROWSER_HEADLESS === "true" });
+  const connection = await openOracleBrowserConnection({ headless: process.env.BROWSER_HEADLESS === "true" });
   const results = [];
 
   try {
     for (const job of jobs) {
       try {
-        results.push(await refreshTrackedTicketWithBrowserContext(job.ticketId, context));
+        results.push(await refreshTrackedTicketWithBrowserContext(job.ticketId, connection.context));
       } catch (error) {
         await prisma.pollingJob.update({
           where: { id: job.id },
@@ -60,7 +60,7 @@ export async function refreshDueBrowserJobs(limit = 10) {
       }
     }
   } finally {
-    await context.close();
+    await connection.close();
   }
 
   return results;

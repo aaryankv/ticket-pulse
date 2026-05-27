@@ -1,4 +1,4 @@
-﻿import { setTimeout as delay } from "node:timers/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { logger } from "@/lib/logger";
 import { getBrowserSessionState, openOracleSsoPortals } from "@/services/browser-tracker/session";
 
@@ -7,7 +7,7 @@ async function main() {
   const state = getBrowserSessionState();
 
   logger.info({ profileDir: state.profileDir }, "Opening Oracle portals for unified login");
-  const { context } = await openOracleSsoPortals();
+  const connection = await openOracleSsoPortals();
 
   logger.info(
     { keepOpenMinutes },
@@ -15,7 +15,7 @@ async function main() {
   );
 
   await delay(keepOpenMinutes * 60_000);
-  await context.close();
+  await connection.close();
   logger.info("Oracle browser session connect window closed");
 }
 

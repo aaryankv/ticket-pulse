@@ -100,9 +100,9 @@ A Ticket Pulse app login cannot magically reuse browser cookies from `support.or
 
 ## Local Browser Tracker
 
-For Oracle pages that already open after unified login in your normal browser, Ticket Pulse includes a local Playwright-based tracker. It uses a persistent browser profile on the same Windows machine, opens Oracle Support, Jira, and Bug Oracle pages, reads visible status fields, stores snapshots, and triggers the same change detection and notifications as API polling.
+For Oracle pages that already open after unified login in your normal browser, Ticket Pulse includes a local Playwright-based tracker. It can attach to Microsoft Edge through a localhost debugging endpoint, open Oracle Support, Jira, and Bug Oracle pages, read visible status fields, store snapshots, and trigger the same change detection and notifications as API polling.
 
-1. Connect the browser profile and complete Oracle SSO:
+1. Start or attach the Edge session:
 
 ```bash
 npm run browser:connect
@@ -120,11 +120,14 @@ npm run browser:worker
 npm run browser:refresh -- <tracked-ticket-id>
 ```
 
-You can also open Settings in the app and click `Connect Oracle session`. The browser profile is stored in `.oracle-browser-profile` by default and is ignored by Git.
+You can also open Settings in the app and click `Connect Oracle session`. Normal already-open Edge windows cannot be attached unless Edge was started with a local debugging port. If attach fails, close all Edge windows once and click `Connect Oracle session` again; Ticket Pulse will restart Edge with the normal profile and reuse saved Oracle SSO cookies.
 
 Useful environment values:
 
 ```bash
+BROWSER_CDP_URL="http://127.0.0.1:9222"
+BROWSER_CDP_LAUNCH="true"
+EDGE_PROFILE_DIRECTORY="Default"
 BROWSER_PROFILE_DIR=".oracle-browser-profile"
 BROWSER_HEADLESS="false"
 BROWSER_CHANNEL="msedge"
@@ -134,4 +137,4 @@ BROWSER_WORKER_INTERVAL_MINUTES="30"
 PLAYWRIGHT_BROWSER_CHANNEL="msedge"
 ```
 
-Ticket Pulse defaults to installed Microsoft Edge for local browser tracking. If Edge channel detection fails, set `BROWSER_EXECUTABLE_PATH` to the Edge executable, for example `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`.
+Ticket Pulse defaults to Microsoft Edge attach mode. If Edge channel detection fails, set `EDGE_EXECUTABLE_PATH` to the Edge executable, for example `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`.

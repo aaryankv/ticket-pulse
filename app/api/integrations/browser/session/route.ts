@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertSameOrigin } from "@/lib/csrf";
 import { rateLimit } from "@/lib/rate-limit";
 import { requireApiUser } from "@/lib/api-auth";
-import { getBrowserSessionState } from "@/services/browser-tracker/session";
+import { getBrowserSessionState, prepareBrowserSession } from "@/services/browser-tracker/session";
 
 export async function GET(request: NextRequest) {
   const limited = rateLimit(request);
@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
   const err = path.join(cwd, "browser-connect.stderr.log");
 
   try {
+    await prepareBrowserSession();
     const child = spawnBrowserConnect(cwd, out, err);
     child.unref();
   } catch (error) {
