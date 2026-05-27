@@ -11,6 +11,14 @@ const defaultProfileDir = ".oracle-browser-profile";
 const defaultBrowserChannel = "msedge";
 const defaultCdpUrl = "http://127.0.0.1:9222";
 
+function getPortalUrls() {
+  return [
+    enterpriseSites.supportOracle.portalUrl,
+    enterpriseSites.jira.portalUrl,
+    enterpriseSites.bugOracle.portalUrl
+  ];
+}
+
 export function getBrowserProfileDir() {
   return path.resolve(process.env.BROWSER_PROFILE_DIR ?? defaultProfileDir);
 }
@@ -32,6 +40,7 @@ export function getBrowserSessionState(): BrowserSessionState {
     cdpUrl: cdpUrl ?? undefined
   };
 }
+
 export async function prepareBrowserSession() {
   const cdpUrl = getBrowserCdpUrl();
   if (cdpUrl) {
@@ -69,11 +78,7 @@ export async function openOracleBrowserConnection(options: BrowserTrackerOptions
 
 export async function openOracleSsoPortals() {
   const connection = await openOracleBrowserConnection({ headless: false });
-  const pages = await Promise.all([
-    openPortal(connection.context, enterpriseSites.supportOracle.portalUrl),
-    openPortal(connection.context, enterpriseSites.jira.portalUrl),
-    openPortal(connection.context, enterpriseSites.bugOracle.portalUrl)
-  ]);
+  const pages = await Promise.all(getPortalUrls().map((url) => openPortal(connection.context, url)));
 
   return { ...connection, pages };
 }
@@ -132,7 +137,7 @@ function launchEdgeForCdp(cdpUrl: string) {
     `--remote-debugging-port=${port}`,
     `--profile-directory=${process.env.EDGE_PROFILE_DIRECTORY || "Default"}`,
     "--new-window",
-    enterpriseSites.supportOracle.portalUrl
+    ...getPortalUrls()
   ];
 
   spawn(executable, args, {
@@ -167,7 +172,7 @@ function resolveEdgeExecutable() {
 
 function buildCdpUnavailableMessage(cdpUrl: string) {
   const port = new URL(cdpUrl || defaultCdpUrl).port || "9222";
-  return `Could not attach to your existing Edge session at ${cdpUrl}. Close all Edge windows once, then click Connect Oracle session again so Edge can restart with --remote-debugging-port=${port}.`;
+  return `Opened Oracle Support, Jira, and Bug Oracle in Edge, but Ticket Pulse could not attach to Edge at ${cdpUrl}. Close all Edge windows once, then click Connect Oracle session again so Edge can restart with --remote-debugging-port=${port}.`;
 }
 
 async function openPortal(context: BrowserContext, url: string): Promise<Page> {
