@@ -9,7 +9,7 @@ export async function getDashboardData(userId?: string): Promise<{
   metrics: DashboardMetrics;
 }> {
   if (!process.env.DATABASE_URL || !userId) {
-    return { tickets: demoTickets, metrics: demoMetrics };
+    return fallbackDashboardData();
   }
 
   try {
@@ -40,16 +40,13 @@ export async function getDashboardData(userId?: string): Promise<{
       metrics: buildMetrics(dashboardTickets)
     };
   } catch {
-    return { tickets: demoTickets, metrics: demoMetrics };
+    return fallbackDashboardData();
   }
 }
 
 export async function getTicketDetails(id: string, userId?: string) {
   if (!process.env.DATABASE_URL || !userId) {
-    return {
-      ticket: findDemoTicket(id),
-      timeline: demoTimeline
-    };
+    return fallbackTicketDetails(id);
   }
 
   try {
@@ -98,11 +95,27 @@ export async function getTicketDetails(id: string, userId?: string) {
       }))
     };
   } catch {
+    return fallbackTicketDetails(id);
+  }
+}
+
+function fallbackDashboardData() {
+  if (process.env.DEMO_MODE === "true") {
+    return { tickets: demoTickets, metrics: demoMetrics };
+  }
+
+  return { tickets: [], metrics: buildMetrics([]) };
+}
+
+function fallbackTicketDetails(id: string) {
+  if (process.env.DEMO_MODE === "true") {
     return {
       ticket: findDemoTicket(id),
       timeline: demoTimeline
     };
   }
+
+  return null;
 }
 
 function buildMetrics(tickets: DashboardTicket[]): DashboardMetrics {

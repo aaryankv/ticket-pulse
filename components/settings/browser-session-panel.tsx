@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { ExternalLink, Loader2, MonitorCheck } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -29,14 +29,16 @@ export function BrowserSessionPanel() {
     const response = await fetch("/api/integrations/browser/session", { method: "POST" });
     setLoading(false);
 
+    const payload = await response.json().catch(() => null);
+
     if (!response.ok) {
-      toast.error("Could not open browser session");
+      toast.error(payload?.detail ?? payload?.error ?? "Could not open browser session");
       return;
     }
 
-    const payload = await response.json();
     setSession(payload.session);
     toast.success("Oracle browser opened. Complete SSO in the browser window.");
+    window.setTimeout(() => void loadSession(), 1500);
   }
 
   useEffect(() => {

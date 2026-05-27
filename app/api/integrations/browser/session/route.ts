@@ -1,4 +1,4 @@
-﻿import { spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { assertSameOrigin } from "@/lib/csrf";
@@ -29,18 +29,45 @@ export async function POST(request: NextRequest) {
   const cwd = process.cwd();
   const out = path.join(cwd, "browser-connect.stdout.log");
   const err = path.join(cwd, "browser-connect.stderr.log");
-  const child = spawn("npm.cmd", ["run", "browser:connect"], {
+
+  try {
+    const child = spawnBrowserConnect(cwd, out, err);
+    child.unref();
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: "Could not open browser session",
+        detail: error instanceof Error ? error.message : "Unknown launch error"
+      },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ started: true, session: getBrowserSessionState() });
+}
+
+function spawnBrowserConnect(cwd: string, stdoutPath: string, stderrPath: string) {
+  const env = {
+    ...process.env,
+    BROWSER_CONNECT_STDOUT: stdoutPath,
+    BROWSER_CONNECT_STDERR: stderrPath
+  };
+
+  if (process.platform === "win32") {
+    // Windows cannot spawn npm.cmd directly from Node without going through cmd.exe.
+    return spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", "npm.cmd run browser:connect"], {
+      cwd,
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env
+    });
+  }
+
+  return spawn("npm", ["run", "browser:connect"], {
     cwd,
     detached: true,
-    stdio: ["ignore", "ignore", "ignore"],
-    windowsHide: false,
-    env: {
-      ...process.env,
-      BROWSER_CONNECT_STDOUT: out,
-      BROWSER_CONNECT_STDERR: err
-    }
+    stdio: "ignore",
+    env
   });
-
-  child.unref();
-  return NextResponse.json({ started: true, session: getBrowserSessionState() });
 }
