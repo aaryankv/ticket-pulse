@@ -1,4 +1,5 @@
-﻿import { CheckCircle2, KeyRound, Plug, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CheckCircle2, KeyRound, Plug, ShieldCheck, TriangleAlert } from "lucide-react";
+import { BrowserSessionPanel } from "@/components/settings/browser-session-panel";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -30,6 +31,7 @@ export default async function SettingsPage() {
           description="Polling now attempts live Oracle Support, Jira, and Bug Oracle fetches when an Oracle SSO/API token is available. Otherwise it records an auth-required event."
         />
       </div>
+      <BrowserSessionPanel />
       <Card>
         <CardHeader>
           <CardTitle>Integration connection</CardTitle>
@@ -126,3 +128,4 @@ async function getConnectionStatus(userId?: string) {
     };
   }
 }
+

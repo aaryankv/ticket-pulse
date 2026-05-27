@@ -1,4 +1,4 @@
-﻿# Ticket Pulse
+# Ticket Pulse
 
 Ticket Pulse is a production-style internal operations platform for tracking linked Support Oracle, Bug Oracle, and Jira work across engineering teams.
 
@@ -97,3 +97,40 @@ Automatic polling now has three modes controlled by `ENTERPRISE_FETCH_MODE`:
 
 A Ticket Pulse app login cannot magically reuse browser cookies from `support.oracle.com`, `jira.oraclecorp.com`, or `bug.oraclecorp.com`. For automatic checks, the worker needs either the Oracle SSO access token issued through the `oracle-sso` provider or an encrypted per-system API token in `ExternalCredential`. The worker should not store raw external passwords.
 
+
+## Local Browser Tracker
+
+For Oracle pages that already open after unified login in your normal browser, Ticket Pulse includes a local Playwright-based tracker. It uses a persistent browser profile on the same Windows machine, opens Oracle Support, Jira, and Bug Oracle pages, reads visible status fields, stores snapshots, and triggers the same change detection and notifications as API polling.
+
+1. Connect the browser profile and complete Oracle SSO:
+
+```bash
+npm run browser:connect
+```
+
+2. Keep automatic browser tracking running:
+
+```bash
+npm run browser:worker
+```
+
+3. Refresh one tracked ticket through the browser path:
+
+```bash
+npm run browser:refresh -- <tracked-ticket-id>
+```
+
+You can also open Settings in the app and click `Connect Oracle session`. The browser profile is stored in `.oracle-browser-profile` by default and is ignored by Git.
+
+Useful environment values:
+
+```bash
+BROWSER_PROFILE_DIR=".oracle-browser-profile"
+BROWSER_HEADLESS="false"
+BROWSER_CHANNEL="chrome"
+BROWSER_EXECUTABLE_PATH=""
+BROWSER_SESSION_CONNECT_MINUTES="20"
+BROWSER_WORKER_INTERVAL_MINUTES="30"
+```
+
+If Playwright cannot download Chromium on the corporate network, install/use Microsoft Edge or Chrome and set either `BROWSER_CHANNEL="chrome"` or `BROWSER_EXECUTABLE_PATH` to the browser executable.

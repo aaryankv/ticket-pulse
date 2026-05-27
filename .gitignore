@@ -34,3 +34,5 @@ Thumbs.db
 
 tsconfig.tsbuildinfo
 next-dev.*.log
+.oracle-browser-profile
+browser-connect.*.log

@@ -1,6 +1,6 @@
-﻿"use client";
+"use client";
 
-import { ArrowDownUp, ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react";
+import { ArrowDownUp, ChevronLeft, ChevronRight, MonitorCheck, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -23,6 +23,7 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [page, setPage] = useState(1);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const [browserRefreshingId, setBrowserRefreshingId] = useState<string | null>(null);
   const pageSize = 8;
 
   const filtered = useMemo(() => {
@@ -86,6 +87,27 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
     toast.success(`Refresh complete: ${payload.changes?.length ?? 0} change(s) detected`);
   }
 
+  async function browserRefreshTicket(ticketId: string) {
+    setBrowserRefreshingId(ticketId);
+    const response = await fetch(`/api/tickets/${ticketId}/refresh-browser`, {
+      method: "POST"
+    });
+
+    setBrowserRefreshingId(null);
+
+    if (!response.ok) {
+      toast.error("Browser refresh failed");
+      return;
+    }
+
+    const payload = await response.json();
+    if (payload.failures?.length) {
+      toast.warning(`Browser refresh finished with ${payload.failures.length} issue(s)`);
+      return;
+    }
+
+    toast.success(`Browser refresh complete: ${payload.changes?.length ?? 0} change(s) detected`);
+  }
   return (
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-[1fr_160px_160px_180px_auto]">
@@ -156,7 +178,7 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
               <TableHead>Last Updated</TableHead>
               <TableHead>Aging</TableHead>
               <TableHead>Risk Level</TableHead>
-              <TableHead className="w-24">Actions</TableHead>
+              <TableHead className="w-28">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -186,15 +208,28 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
                   <RiskBadge risk={ticket.currentRisk} />
                 </TableCell>
                 <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => refreshTicket(ticket.id)}
-                    disabled={refreshingId === ticket.id}
-                    aria-label={`Refresh ${ticket.jiraId ?? ticket.supportTicketId ?? ticket.id}`}
-                  >
-                    <RefreshCw className={refreshingId === ticket.id ? "animate-spin" : ""} />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => refreshTicket(ticket.id)}
+                      disabled={refreshingId === ticket.id}
+                      aria-label={`Refresh ${ticket.jiraId ?? ticket.supportTicketId ?? ticket.id}`}
+                      title="Refresh with API/token adapter"
+                    >
+                      <RefreshCw className={refreshingId === ticket.id ? "animate-spin" : ""} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => browserRefreshTicket(ticket.id)}
+                      disabled={browserRefreshingId === ticket.id}
+                      aria-label={`Browser refresh ${ticket.jiraId ?? ticket.supportTicketId ?? ticket.id}`}
+                      title="Refresh with local Oracle browser session"
+                    >
+                      <MonitorCheck className={browserRefreshingId === ticket.id ? "animate-pulse" : ""} />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
               );
@@ -236,6 +271,8 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
     </div>
   );
 }
+
+
 
 
 
