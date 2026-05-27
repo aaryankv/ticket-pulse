@@ -1,4 +1,4 @@
-﻿import type { TicketSystem } from "@prisma/client";
+import type { TicketSystem } from "@prisma/client";
 import type { Page } from "playwright";
 import type { ExternalTicket } from "@/services/integrations/types";
 
@@ -18,7 +18,7 @@ export async function pageToExternalTicket(input: {
   await assertLoggedIn(input.page, input.system, input.webUrl);
 
   const title = await input.page.title().catch(() => "");
-  const text = normalizeText(await input.page.locator("body").innerText({ timeout: 15_000 }).catch(() => ""));
+  const text = normalizeText(await input.page.locator("body").innerText({ timeout: 5_000 }).catch(() => ""));
 
   return {
     id: input.id,
@@ -44,18 +44,15 @@ export async function pageToExternalTicket(input: {
 
 async function assertLoggedIn(page: Page, system: TicketSystem, webUrl: string) {
   const url = page.url().toLowerCase();
-  const text = normalizeText(await page.locator("body").innerText({ timeout: 10_000 }).catch(() => "")).toLowerCase();
-  const loginSignals = [
-    "single sign-on",
-    "oracle login",
-    "sign in",
-    "username",
-    "password",
-    "identity cloud service",
-    "sso"
-  ];
+  const title = (await page.title().catch(() => "")).toLowerCase();
+  const text = normalizeText(await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "")).toLowerCase();
 
-  if (url.includes("login") || url.includes("signin") || loginSignals.some((signal) => text.includes(signal))) {
+  const loginUrl = url.includes("login") || url.includes("signin") || url.includes("/oauth2/") || url.includes("identity.oraclecloud.com");
+  const passwordPrompt = text.includes("password") && (text.includes("username") || text.includes("user id") || text.includes("oracle account") || text.includes("sign in"));
+  const idcsPrompt = text.includes("identity cloud service") && (text.includes("password") || text.includes("sign in"));
+  const loginTitle = title.includes("sign in") || title.includes("login");
+
+  if (loginUrl && (passwordPrompt || idcsPrompt || loginTitle)) {
     throw new BrowserSsoRequiredError(system, webUrl);
   }
 }

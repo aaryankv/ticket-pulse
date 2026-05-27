@@ -5,7 +5,7 @@ import type { RiskLevel, TicketPriority } from "@prisma/client";
 import { daysBetween } from "@/lib/utils";
 import type { DashboardTicket, TimelineItem } from "@/types/ticket";
 
-type LocalTicketRecord = {
+export type LocalTicketRecord = {
   id: string;
   ownerId: string;
   supportTicketId: string | null;
@@ -26,14 +26,17 @@ type LocalTicketRecord = {
   updatedAt: string;
 };
 
-type LocalTicketEvent = {
-  id: string;
-  ticketId: string;
+export type LocalTicketChange = {
   system: string | null;
   changedField: string;
   previousValue: string | null;
   newValue: string | null;
   message: string;
+};
+
+type LocalTicketEvent = LocalTicketChange & {
+  id: string;
+  ticketId: string;
   createdAt: string;
 };
 
@@ -92,16 +95,13 @@ export async function createLocalTicket(input: {
   };
 
   store.tickets.unshift(ticket);
-  store.events.unshift({
-    id: `local-event-${randomUUID()}`,
-    ticketId: ticket.id,
+  store.events.unshift(toEvent(ticket.id, {
     system: null,
     changedField: "ticket",
     previousValue: null,
     newValue: "MONITORING",
-    message: "Ticket monitoring started in local fallback storage",
-    createdAt: now
-  });
+    message: "Ticket monitoring started in local fallback storage"
+  }, now));
 
   await writeStore(store);
   return ticket;
@@ -147,6 +147,11 @@ export async function listLocalTickets(ownerId: string, filters?: LocalTicketFil
   };
 }
 
+export async function getLocalTicketRecord(id: string, ownerId: string) {
+  const store = await readStore();
+  return store.tickets.find((item) => item.id === id && item.ownerId === ownerId) ?? null;
+}
+
 export async function getLocalTicketDetails(id: string, ownerId: string) {
   const store = await readStore();
   const ticket = store.tickets.find((item) => item.id === id && item.ownerId === ownerId);
@@ -172,7 +177,34 @@ export async function getLocalTicketDetails(id: string, ownerId: string) {
   };
 }
 
-function toDashboardTicket(ticket: LocalTicketRecord): DashboardTicket {
+export async function updateLocalTicket(input: {
+  id: string;
+  ownerId: string;
+  patch: Partial<Pick<LocalTicketRecord, "status" | "priority" | "assignee" | "resolution" | "slaDueAt" | "dueDate" | "currentRisk" | "lastSyncedAt" | "externalLinks">>;
+  changes: LocalTicketChange[];
+}) {
+  const store = await readStore();
+  const index = store.tickets.findIndex((ticket) => ticket.id === input.id && ticket.ownerId === input.ownerId);
+
+  if (index < 0) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const updated: LocalTicketRecord = {
+    ...store.tickets[index],
+    ...input.patch,
+    updatedAt: now
+  };
+
+  store.tickets[index] = updated;
+  store.events.unshift(...input.changes.map((change) => toEvent(updated.id, change, now)));
+  await writeStore(store);
+
+  return updated;
+}
+
+export function toDashboardTicket(ticket: LocalTicketRecord): DashboardTicket {
   return {
     id: ticket.id,
     supportTicketId: ticket.supportTicketId,
@@ -210,6 +242,15 @@ async function writeStore(store: LocalTicketStore) {
   const storePath = getStorePath();
   await mkdir(path.dirname(storePath), { recursive: true });
   await writeFile(storePath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+}
+
+function toEvent(ticketId: string, change: LocalTicketChange, createdAt: string): LocalTicketEvent {
+  return {
+    id: `local-event-${randomUUID()}`,
+    ticketId,
+    createdAt,
+    ...change
+  };
 }
 
 function getStorePath() {
