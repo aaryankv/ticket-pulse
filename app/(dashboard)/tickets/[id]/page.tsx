@@ -1,4 +1,5 @@
-﻿import { ExternalLink } from "lucide-react";
+import type { TicketPriority } from "@prisma/client";
+import { ExternalLink } from "lucide-react";
 import { notFound } from "next/navigation";
 import { ExternalTicketLink } from "@/components/tickets/external-ticket-link";
 import { PriorityBadge, RiskBadge, StatusBadge } from "@/components/tickets/status-badge";
@@ -68,6 +69,43 @@ export default async function TicketDetailsPage({ params }: PageProps) {
           </Card>
           <Card>
             <CardHeader>
+              <CardTitle>Linked system details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <SystemDetail
+                id="support-oracle"
+                name="Oracle Support"
+                identifier={ticket.supportTicketId}
+                href={links.supportOracle?.ticketUrl}
+                status={ticket.status}
+                priority={ticket.priority}
+                assignee={ticket.assignee}
+                lastUpdated={ticket.lastSyncedAt ?? ticket.updatedAt}
+              />
+              <SystemDetail
+                id="bug-db"
+                name="Bug DB"
+                identifier={ticket.bugId}
+                href={links.bugOracle?.ticketUrl}
+                status={ticket.status}
+                priority={ticket.priority}
+                assignee={ticket.assignee}
+                lastUpdated={ticket.lastSyncedAt ?? ticket.updatedAt}
+              />
+              <SystemDetail
+                id="jira"
+                name="Jira"
+                identifier={ticket.jiraId}
+                href={links.jira?.ticketUrl}
+                status={ticket.status}
+                priority={ticket.priority}
+                assignee={ticket.assignee}
+                lastUpdated={ticket.lastSyncedAt ?? ticket.updatedAt}
+              />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
               <CardTitle>SSO deep links</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -88,6 +126,55 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="text-right text-sm font-medium">{children}</span>
     </div>
+  );
+}
+
+function SystemDetail({
+  id,
+  name,
+  identifier,
+  href,
+  status,
+  priority,
+  assignee,
+  lastUpdated
+}: {
+  id: string;
+  name: string;
+  identifier: string | null;
+  href?: string;
+  status: string;
+  priority: TicketPriority;
+  assignee: string | null;
+  lastUpdated: string;
+}) {
+  return (
+    <section id={id} className="scroll-mt-24 border-b pb-4 last:border-0 last:pb-0">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold">{name}</p>
+          <p className="text-xs text-muted-foreground">{identifier ?? "Not linked"}</p>
+        </div>
+        <Button asChild variant="outline" size="sm" disabled={!href}>
+          <a href={href ?? "#"} target="_blank" rel="noreferrer">
+            Open
+            <ExternalLink />
+          </a>
+        </Button>
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground">Status</span>
+          <StatusBadge status={status} />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground">Priority</span>
+          <PriorityBadge priority={priority} />
+        </div>
+        <Detail label="Assignee">{assignee ?? "Unassigned"}</Detail>
+        <Detail label="Last checked">{formatDate(lastUpdated)}</Detail>
+      </div>
+    </section>
   );
 }
 

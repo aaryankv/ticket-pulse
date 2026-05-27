@@ -120,13 +120,13 @@ npm run browser:worker
 npm run browser:refresh -- <tracked-ticket-id>
 ```
 
-You can also open Settings in the app and click `Connect Oracle session`. Normal already-open Edge windows cannot be attached unless Edge was started with a local debugging port. If attach fails, close all Edge windows once and click `Connect Oracle session` again; Ticket Pulse will restart Edge with the normal profile and reuse saved Oracle SSO cookies.
+You can also open Settings in the app and click `Connect Oracle session`. Keep the Edge window that was started with the local debugging port open; Ticket Pulse will attach to that existing Edge profile and will not launch another Edge window when `BROWSER_CDP_LAUNCH="false"`.
 
 Useful environment values:
 
 ```bash
 BROWSER_CDP_URL="http://127.0.0.1:9222"
-BROWSER_CDP_LAUNCH="true"
+BROWSER_CDP_LAUNCH="false"
 EDGE_PROFILE_DIRECTORY="Default"
 BROWSER_PROFILE_DIR=".oracle-browser-profile"
 BROWSER_HEADLESS="false"

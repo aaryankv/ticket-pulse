@@ -78,7 +78,11 @@ export async function openOracleBrowserConnection(options: BrowserTrackerOptions
 
 export async function openOracleSsoPortals() {
   const connection = await openOracleBrowserConnection({ headless: false });
-  const pages = await Promise.all(getPortalUrls().map((url) => openPortal(connection.context, url)));
+  const pages: Page[] = [];
+
+  for (const url of getPortalUrls()) {
+    pages.push(await openPortal(connection.context, url));
+  }
 
   return { ...connection, pages };
 }
@@ -136,7 +140,6 @@ function launchEdgeForCdp(cdpUrl: string) {
   const args = [
     `--remote-debugging-port=${port}`,
     `--profile-directory=${process.env.EDGE_PROFILE_DIRECTORY || "Default"}`,
-    "--new-window",
     ...getPortalUrls()
   ];
 
@@ -172,11 +175,120 @@ function resolveEdgeExecutable() {
 
 function buildCdpUnavailableMessage(cdpUrl: string) {
   const port = new URL(cdpUrl || defaultCdpUrl).port || "9222";
-  return `Opened Oracle Support, Jira, and Bug Oracle in Edge, but Ticket Pulse could not attach to Edge at ${cdpUrl}. Close all Edge windows once, then click Connect Oracle session again so Edge can restart with --remote-debugging-port=${port}.`;
+  return `Ticket Pulse could not attach to the existing Edge session at ${cdpUrl}. Keep the Edge window started with --remote-debugging-port=${port} open, then refresh Settings and try again.`;
 }
 
 async function openPortal(context: BrowserContext, url: string): Promise<Page> {
-  const page = await context.newPage();
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90_000 }).catch(() => undefined);
+  const existing = findPageForHost(context, url);
+  if (existing) {
+    return existing;
+  }
+
+  return openUrlInTicketPulseWindow(context, url);
+}
+
+export async function openUrlInTicketPulseWindow(context: BrowserContext, url: string): Promise<Page> {
+  const opener = findTicketPulsePage(context);
+
+  if (!opener) {
+    throw new Error("Ticket Pulse is not open in the attached Edge session, so missing Oracle tabs cannot be opened in the same window.");
+  }
+
+  const linkId = `ticket-pulse-open-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  await opener.evaluate(
+    ({ targetUrl, id }) => {
+      const link = document.createElement("a");
+      link.id = id;
+      link.href = targetUrl;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = "Open";
+      link.style.position = "fixed";
+      link.style.left = "0";
+      link.style.bottom = "0";
+      link.style.width = "1px";
+      link.style.height = "1px";
+      link.style.opacity = "0.01";
+      link.style.zIndex = "2147483647";
+      document.body.appendChild(link);
+    },
+    { targetUrl: url, id: linkId }
+  );
+
+  const popupPromise = opener.waitForEvent("popup", { timeout: 8_000 }).catch(() => null);
+  await opener.locator(`#${linkId}`).click({ timeout: 5_000 }).catch(() => undefined);
+  await opener.evaluate((id) => document.getElementById(id)?.remove(), linkId).catch(() => undefined);
+
+  const popup = await popupPromise;
+  let page = popup ?? findPageForHost(context, url);
+
+  if (!page) {
+    await openUrlAsTabWithCdp(context, opener, url);
+    page = await waitForPageForHost(context, url);
+  }
+
+  if (!page) {
+    throw new Error(`Edge did not open ${url} from the Ticket Pulse tab.`);
+  }
+
+  await page.waitForLoadState("domcontentloaded", { timeout: 90_000 }).catch(() => undefined);
   return page;
+}
+
+async function openUrlAsTabWithCdp(context: BrowserContext, opener: Page, url: string) {
+  const session = await context.newCDPSession(opener);
+  try {
+    await session.send("Target.createTarget", { url, newWindow: false, background: false });
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
+}
+
+async function waitForPageForHost(context: BrowserContext, url: string) {
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    const page = findPageForHost(context, url);
+    if (page) {
+      return page;
+    }
+    await delay(250);
+  }
+
+  return undefined;
+}
+
+function findPageForHost(context: BrowserContext, url: string) {
+  const host = new URL(url).hostname.toLowerCase();
+  return context.pages().find((page) => {
+    const pageUrl = page.url().toLowerCase();
+    return pageUrl.includes(host);
+  });
+}
+
+function findTicketPulsePage(context: BrowserContext) {
+  const configuredHosts = [process.env.APP_BASE_URL, process.env.NEXTAUTH_URL]
+    .filter(Boolean)
+    .flatMap((value) => {
+      try {
+        return [new URL(value as string).host.toLowerCase()];
+      } catch {
+        return [];
+      }
+    });
+
+  const hosts = new Set(["localhost:3000", "127.0.0.1:3000", ...configuredHosts]);
+
+  return context.pages().find((page) => {
+    try {
+      const pageUrl = page.url();
+      if (hosts.has(new URL(pageUrl).host.toLowerCase())) {
+        return true;
+      }
+    } catch {
+      // Fall through to the title check below.
+    }
+
+    return false;
+  });
 }

@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertSameOrigin } from "@/lib/csrf";
 import { rateLimit } from "@/lib/rate-limit";
 import { requireApiUser } from "@/lib/api-auth";
-import { getBrowserSessionState, prepareBrowserSession } from "@/services/browser-tracker/session";
+import { getBrowserSessionState, openOracleSsoPortals, prepareBrowserSession } from "@/services/browser-tracker/session";
 
 export async function GET(request: NextRequest) {
   const limited = rateLimit(request);
@@ -32,6 +32,13 @@ export async function POST(request: NextRequest) {
 
   try {
     await prepareBrowserSession();
+
+    const session = getBrowserSessionState();
+    if (session.connectionMode === "existing-edge") {
+      await openOracleSsoPortals();
+      return NextResponse.json({ started: false, session: getBrowserSessionState() });
+    }
+
     const child = spawnBrowserConnect(cwd, out, err);
     child.unref();
   } catch (error) {

@@ -76,14 +76,22 @@ export function BrowserSessionPanel() {
             {loading ? <Loader2 className="animate-spin" /> : <MonitorCheck />}
             Connect Oracle session
           </Button>
-          <Button asChild variant="outline">
-            <a href="https://support.oracle.com/support/?page=sptemplate&sptemplate=service-request" target="_blank" rel="noreferrer">
-              Oracle Support
-              <ExternalLink />
-            </a>
-          </Button>
+          <PortalButton href="https://support.oracle.com/support/?page=sptemplate&sptemplate=service-request" label="Oracle Support" />
+          <PortalButton href="https://jira.oraclecorp.com/" label="Jira" />
+          <PortalButton href="https://bug.oraclecorp.com/ords/bug/bugui/home" label="Bug DB" />
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function PortalButton({ href, label }: { href: string; label: string }) {
+  return (
+    <Button asChild variant="outline">
+      <a href={href} target="_blank" rel="noreferrer">
+        {label}
+        <ExternalLink />
+      </a>
+    </Button>
   );
 }

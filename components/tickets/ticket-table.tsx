@@ -2,7 +2,8 @@
 
 import { ArrowDownUp, ChevronLeft, ChevronRight, MonitorCheck, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,8 @@ import type { DashboardTicket } from "@/types/ticket";
 type SortKey = "updatedAt" | "agingDays" | "priority" | "status";
 
 export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
+  const router = useRouter();
+  const autoRefreshStarted = useRef(false);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("ALL");
   const [priority, setPriority] = useState("ALL");
@@ -65,6 +68,32 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
   const statuses = Array.from(new Set(tickets.map((ticket) => ticket.status)));
   const priorities = Array.from(new Set(tickets.map((ticket) => ticket.priority)));
 
+  useEffect(() => {
+    if (autoRefreshStarted.current || tickets.length === 0) {
+      return;
+    }
+
+    autoRefreshStarted.current = true;
+    const controller = new AbortController();
+
+    void (async () => {
+      for (const ticket of tickets) {
+        const response = await fetch(`/api/tickets/${ticket.id}/refresh-browser`, {
+          method: "POST",
+          signal: controller.signal
+        }).catch(() => null);
+
+        if (!response?.ok) {
+          continue;
+        }
+      }
+
+      router.refresh();
+    })();
+
+    return () => controller.abort();
+  }, [router, tickets]);
+
   async function refreshTicket(ticketId: string) {
     setRefreshingId(ticketId);
     const response = await fetch(`/api/tickets/${ticketId}/refresh`, {
@@ -81,10 +110,12 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
     const payload = await response.json();
     if (payload.failures?.length) {
       toast.warning(`Refresh finished with ${payload.failures.length} integration issue(s)`);
+      router.refresh();
       return;
     }
 
     toast.success(`Refresh complete: ${payload.changes?.length ?? 0} change(s) detected`);
+    router.refresh();
   }
 
   async function browserRefreshTicket(ticketId: string) {
@@ -103,10 +134,12 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
     const payload = await response.json();
     if (payload.failures?.length) {
       toast.warning(`Browser refresh finished with ${payload.failures.length} issue(s)`);
+      router.refresh();
       return;
     }
 
     toast.success(`Browser refresh complete: ${payload.changes?.length ?? 0} change(s) detected`);
+    router.refresh();
   }
   return (
     <div className="space-y-4">
@@ -193,8 +226,22 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
                     Details
                   </Link>
                 </TableCell>
-                <TableCell><ExternalTicketLink href={links.bugOracle?.ticketUrl} label={ticket.bugId} /></TableCell>
-                <TableCell><ExternalTicketLink href={links.jira?.ticketUrl} label={ticket.jiraId} /></TableCell>
+                <TableCell>
+                  <ExternalTicketLink href={links.bugOracle?.ticketUrl} label={ticket.bugId} />
+                  {ticket.bugId ? (
+                    <Link href={`/tickets/${ticket.id}#bug-db`} className="mt-1 block text-xs text-muted-foreground hover:text-foreground">
+                      Details
+                    </Link>
+                  ) : null}
+                </TableCell>
+                <TableCell>
+                  <ExternalTicketLink href={links.jira?.ticketUrl} label={ticket.jiraId} />
+                  {ticket.jiraId ? (
+                    <Link href={`/tickets/${ticket.id}#jira`} className="mt-1 block text-xs text-muted-foreground hover:text-foreground">
+                      Details
+                    </Link>
+                  ) : null}
+                </TableCell>
                 <TableCell>
                   <StatusBadge status={ticket.status} />
                 </TableCell>

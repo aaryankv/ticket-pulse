@@ -9,12 +9,20 @@ export class BrowserSsoRequiredError extends Error {
   }
 }
 
+export class BrowserPageUnavailableError extends Error {
+  constructor(system: TicketSystem, url: string, reason: string) {
+    super(`${formatSystem(system)} page is unavailable in Edge: ${url}. ${reason}`);
+    this.name = "BrowserPageUnavailableError";
+  }
+}
+
 export async function pageToExternalTicket(input: {
   page: Page;
   system: TicketSystem;
   id: string;
   webUrl: string;
 }): Promise<ExternalTicket> {
+  await waitForTicketPageAfterRedirect(input.page, input.webUrl);
   await assertLoggedIn(input.page, input.system, input.webUrl);
 
   const title = await input.page.title().catch(() => "");
@@ -42,19 +50,41 @@ export async function pageToExternalTicket(input: {
   };
 }
 
+async function waitForTicketPageAfterRedirect(page: Page, webUrl: string) {
+  const expectedHost = new URL(webUrl).hostname.toLowerCase();
+  const deadline = Date.now() + 60_000;
+
+  while (Date.now() < deadline) {
+    const url = page.url().toLowerCase();
+    if (url.includes(expectedHost) && !isLoginUrl(url) && !url.startsWith("chrome-error://")) {
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+}
+
 async function assertLoggedIn(page: Page, system: TicketSystem, webUrl: string) {
   const url = page.url().toLowerCase();
   const title = (await page.title().catch(() => "")).toLowerCase();
   const text = normalizeText(await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "")).toLowerCase();
 
-  const loginUrl = url.includes("login") || url.includes("signin") || url.includes("/oauth2/") || url.includes("identity.oraclecloud.com");
+  const browserErrorPage = url.startsWith("chrome-error://") || text.includes("this site can\'t be reached") || text.includes("dns_probe") || text.includes("err_name_not_resolved");
+  const loginUrl = isLoginUrl(url);
   const passwordPrompt = text.includes("password") && (text.includes("username") || text.includes("user id") || text.includes("oracle account") || text.includes("sign in"));
   const idcsPrompt = text.includes("identity cloud service") && (text.includes("password") || text.includes("sign in"));
   const loginTitle = title.includes("sign in") || title.includes("login");
 
+  if (browserErrorPage) {
+    throw new BrowserPageUnavailableError(system, webUrl, "Edge showed a network/error page instead of the ticket");
+  }
+
   if (loginUrl && (passwordPrompt || idcsPrompt || loginTitle)) {
     throw new BrowserSsoRequiredError(system, webUrl);
   }
+}
+
+function isLoginUrl(url: string) {
+  return url.includes("login") || url.includes("signin") || url.includes("/oauth2/") || url.includes("identity.oraclecloud.com");
 }
 
 function extractStatus(system: TicketSystem, text: string) {

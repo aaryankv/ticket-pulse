@@ -265,9 +265,11 @@ function aggregateTicketState(
   const bug = normalizedTickets.find((ticket) => ticket.system === "BUG_ORACLE");
   const support = normalizedTickets.find((ticket) => ticket.system === "SUPPORT_ORACLE");
   const primary = jira ?? bug ?? support;
+  const statusSource = [jira, bug, support].find((ticket) => ticket?.status && ticket.status !== "UNKNOWN");
+  const primaryStatus = primary?.status;
 
   return {
-    status: primary?.status ?? currentTicket.status,
+    status: statusSource?.status ?? (primaryStatus && primaryStatus !== "UNKNOWN" ? primaryStatus : currentTicket.status),
     priority: highestPriority(normalizedTickets.map((ticket) => normalizePriority(ticket.priority)).concat(currentTicket.priority)),
     assignee: jira?.assignee ?? bug?.assignee ?? support?.assignee ?? currentTicket.assignee,
     resolution: jira?.resolution ?? bug?.resolution ?? support?.resolution ?? currentTicket.resolution,

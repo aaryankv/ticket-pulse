@@ -9,8 +9,8 @@ import {
   type LocalTicketRecord
 } from "@/lib/local-ticket-store";
 import { daysBetween } from "@/lib/utils";
-import { pageToExternalTicket, BrowserSsoRequiredError } from "@/services/browser-tracker/parser";
-import { openOracleBrowserConnection } from "@/services/browser-tracker/session";
+import { BrowserSsoRequiredError, pageToExternalTicket } from "@/services/browser-tracker/parser";
+import { openOracleBrowserConnection, openUrlInTicketPulseWindow } from "@/services/browser-tracker/session";
 import { calculateRisk } from "@/services/risk";
 
 type LocalBrowserTarget = {
@@ -29,6 +29,10 @@ type BrowserObservedTicket = {
   dueDate: string | null | undefined;
 };
 
+type TargetRefreshResult =
+  | { observed: BrowserObservedTicket; failure?: never }
+  | { observed?: never; failure: string };
+
 export async function refreshLocalTicketWithBrowser(id: string, ownerId: string) {
   const ticket = await getLocalTicketRecord(id, ownerId);
   if (!ticket) {
@@ -36,42 +40,19 @@ export async function refreshLocalTicketWithBrowser(id: string, ownerId: string)
   }
 
   const targets = getLocalBrowserTargets(ticket);
-  const observed: BrowserObservedTicket[] = [];
-  const failures: string[] = [];
-
   const connection = await openOracleBrowserConnection({ headless: false });
+
+  const results: TargetRefreshResult[] = [];
   try {
     for (const target of targets) {
-      const { page, shouldClose } = await getTargetPage(connection.context, target);
-      try {
-        const externalTicket = await pageToExternalTicket({
-          page,
-          system: target.system,
-          id: target.externalId,
-          webUrl: target.url
-        });
-
-        observed.push({
-          system: target.system,
-          status: externalTicket.rawStatus,
-          priority: externalTicket.priority,
-          assignee: externalTicket.assignee,
-          resolution: externalTicket.resolution,
-          slaDueAt: externalTicket.slaDueAt,
-          dueDate: externalTicket.dueDate
-        });
-      } catch (error) {
-        failures.push(formatBrowserFailure(target.system, error));
-      } finally {
-        if (shouldClose) {
-          await page.close().catch(() => undefined);
-        }
-      }
+      results.push(await refreshTarget(connection.context, target, connection.source !== "existing-edge"));
     }
   } finally {
     await connection.close();
   }
 
+  const observed = results.flatMap((result) => (result.observed ? [result.observed] : []));
+  const failures = results.flatMap((result) => (result.failure ? [result.failure] : []));
   const aggregate = aggregateLocalTicketState(observed, ticket);
   const changes = buildLocalChanges(ticket, aggregate);
   const failureChanges = failures.map((message): LocalTicketChange => ({
@@ -126,16 +107,105 @@ export async function refreshLocalTicketWithBrowser(id: string, ownerId: string)
   };
 }
 
-async function getTargetPage(context: BrowserContext, target: LocalBrowserTarget): Promise<{ page: Page; shouldClose: boolean }> {
-  const existing = context.pages().find((page) => urlMatchesTarget(page.url(), target));
-  if (existing) {
-    return { page: existing, shouldClose: false };
+async function refreshTarget(context: BrowserContext, target: LocalBrowserTarget, allowNewPage: boolean): Promise<TargetRefreshResult> {
+  const { page, shouldClose, atTargetUrl } = await getTargetPage(context, target, allowNewPage);
+
+  try {
+    await forceRefreshTargetPage(page, target, atTargetUrl);
+    const currentPage = findExactTargetPage(context, target) ?? page;
+    const externalTicket = await readExternalTicketFromPage(context, target, currentPage);
+
+    return {
+      observed: {
+        system: target.system,
+        status: externalTicket.rawStatus,
+        priority: externalTicket.priority,
+        assignee: externalTicket.assignee,
+        resolution: externalTicket.resolution,
+        slaDueAt: externalTicket.slaDueAt,
+        dueDate: externalTicket.dueDate
+      }
+    };
+  } catch (error) {
+    return { failure: formatBrowserFailure(target.system, error) };
+  } finally {
+    if (shouldClose) {
+      await page.close().catch(() => undefined);
+    }
+  }
+}
+
+async function readExternalTicketFromPage(context: BrowserContext, target: LocalBrowserTarget, page: Page) {
+  try {
+    return await pageToExternalTicket({
+      page,
+      system: target.system,
+      id: target.externalId,
+      webUrl: target.url
+    });
+  } catch (error) {
+    if (!isRecoverableNavigationAbort(error)) {
+      throw error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const replacementPage = findExactTargetPage(context, target);
+    if (!replacementPage) {
+      throw error;
+    }
+
+    return pageToExternalTicket({
+      page: replacementPage,
+      system: target.system,
+      id: target.externalId,
+      webUrl: target.url
+    });
+  }
+}
+
+async function getTargetPage(context: BrowserContext, target: LocalBrowserTarget, allowNewPage: boolean): Promise<{ page: Page; shouldClose: boolean; atTargetUrl: boolean }> {
+  const pages = context.pages();
+  const exactTicketPage = findExactTargetPage(context, target);
+  if (exactTicketPage) {
+    return { page: exactTicketPage, shouldClose: false, atTargetUrl: true };
   }
 
-  const page = await context.newPage();
-  await page.goto(target.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  for (const page of pages) {
+    if (await pageMatchesSystem(page, target.system)) {
+      return { page, shouldClose: false, atTargetUrl: false };
+    }
+  }
+
+  if (!allowNewPage) {
+    return { page: await openUrlInTicketPulseWindow(context, target.url), shouldClose: false, atTargetUrl: false };
+  }
+
+  return { page: await context.newPage(), shouldClose: true, atTargetUrl: false };
+}
+
+async function forceRefreshTargetPage(page: Page, target: LocalBrowserTarget, atTargetUrl: boolean) {
+  // Exact ticket tabs reload. Generic system tabs navigate to the linked ticket and stay open.
+  try {
+    if (atTargetUrl) {
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    } else {
+      await page.goto(target.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    }
+  } catch (error) {
+    if (!isRecoverableNavigationAbort(error) || !urlMatchesTarget(page.url(), target)) {
+      throw error;
+    }
+  }
+
   await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
-  return { page, shouldClose: true };
+}
+
+function isRecoverableNavigationAbort(error: unknown) {
+  return error instanceof Error && /ERR_ABORTED|frame was detached|Target page, context or browser has been closed/i.test(error.message);
+}
+
+function findExactTargetPage(context: BrowserContext, target: LocalBrowserTarget) {
+  return context.pages().find((page) => urlMatchesTarget(page.url(), target));
 }
 
 function urlMatchesTarget(currentUrl: string, target: LocalBrowserTarget) {
@@ -151,6 +221,34 @@ function urlMatchesTarget(currentUrl: string, target: LocalBrowserTarget) {
       return current.includes("jira.oraclecorp.com") && current.includes(`/browse/${id}`);
     default:
       return false;
+  }
+}
+
+async function pageMatchesSystem(page: Page, system: TicketSystem) {
+  const host = systemHost(system);
+  if (!host) {
+    return false;
+  }
+
+  const currentUrl = page.url().toLowerCase();
+  if (currentUrl.includes(host)) {
+    return true;
+  }
+
+  const title = (await page.title().catch(() => "")).toLowerCase();
+  return title.includes(host);
+}
+
+function systemHost(system: TicketSystem) {
+  switch (system) {
+    case "SUPPORT_ORACLE":
+      return "support.oracle.com";
+    case "BUG_ORACLE":
+      return "bug.oraclecorp.com";
+    case "JIRA":
+      return "jira.oraclecorp.com";
+    default:
+      return null;
   }
 }
 
@@ -175,8 +273,11 @@ function aggregateLocalTicketState(observed: BrowserObservedTicket[], current: L
   const support = observed.find((ticket) => ticket.system === "SUPPORT_ORACLE");
   const primary = jira ?? bug ?? support;
 
+  const statusSource = [jira, bug, support].find((ticket) => ticket?.status && ticket.status !== "UNKNOWN");
+  const primaryStatus = primary?.status;
+
   return {
-    status: primary?.status ?? current.status,
+    status: statusSource?.status ?? (primaryStatus && primaryStatus !== "UNKNOWN" ? primaryStatus : current.status),
     priority: highestPriority(observed.map((ticket) => normalizePriority(ticket.priority)).concat(current.priority)),
     assignee: jira?.assignee ?? bug?.assignee ?? support?.assignee ?? current.assignee,
     resolution: jira?.resolution ?? bug?.resolution ?? support?.resolution ?? current.resolution,
