@@ -8,9 +8,9 @@ export const registerSchema = z.object({
 
 export const ticketCreateSchema = z
   .object({
-    supportTicketId: z.string().trim().max(80).optional().or(z.literal("")),
-    bugId: z.string().trim().max(80).optional().or(z.literal("")),
-    jiraId: z.string().trim().max(80).optional().or(z.literal("")),
+    supportTicketId: z.string().trim().max(500).optional().or(z.literal("")),
+    bugId: z.string().trim().max(500).optional().or(z.literal("")),
+    jiraId: z.string().trim().max(500).optional().or(z.literal("")),
     notes: z.string().trim().max(2000).optional().or(z.literal("")),
     priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL", "BLOCKER"])
   })

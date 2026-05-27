@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getLocalTicketDetails, isDatabaseUnavailable, listLocalTickets } from "@/lib/local-ticket-store";
 import { demoMetrics, demoTickets, demoTimeline, findDemoTicket } from "@/lib/demo-data";
 import { daysBetween } from "@/lib/utils";
 import type { DashboardMetrics, DashboardTicket, TimelineItem } from "@/types/ticket";
@@ -39,7 +40,12 @@ export async function getDashboardData(userId?: string): Promise<{
       tickets: dashboardTickets,
       metrics: buildMetrics(dashboardTickets)
     };
-  } catch {
+  } catch (error) {
+    if (isDatabaseUnavailable(error) && userId) {
+      const local = await listLocalTickets(userId);
+      return { tickets: local.tickets, metrics: buildMetrics(local.tickets) };
+    }
+
     return fallbackDashboardData();
   }
 }
@@ -94,7 +100,11 @@ export async function getTicketDetails(id: string, userId?: string) {
         createdAt: event.createdAt.toISOString()
       }))
     };
-  } catch {
+  } catch (error) {
+    if (isDatabaseUnavailable(error) && userId) {
+      return getLocalTicketDetails(id, userId);
+    }
+
     return fallbackTicketDetails(id);
   }
 }

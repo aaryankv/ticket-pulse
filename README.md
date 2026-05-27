@@ -85,7 +85,7 @@ Ticket Pulse now recognizes the SSO-protected Oracle URLs used by support engine
 - Bug Oracle portal: `https://bug.oraclecorp.com/ords/bug/bugui/home`
 - Bug Oracle record deep link: `https://bug.oraclecorp.com/pls/bug/webbug_edit.edit_info_top?rptno=39342735`
 
-The UI can accept either bare IDs or pasted URLs. Links open in a new tab and rely on the engineer's browser SSO session.
+The UI can accept either bare IDs or pasted URLs. Links open in a new tab and rely on the engineer's browser SSO session. When PostgreSQL is unavailable in local development, ticket creation falls back to `.local-data/tickets.json`; production should use PostgreSQL.
 
 For app login, configure `ORACLE_SSO_ISSUER`, `ORACLE_SSO_CLIENT_ID`, and `ORACLE_SSO_CLIENT_SECRET` to enable the optional `oracle-sso` OIDC provider in NextAuth.
 

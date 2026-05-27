@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -37,7 +37,8 @@ export function TicketForm() {
     setLoading(false);
 
     if (!response.ok) {
-      toast.error("Ticket could not be created");
+      const payload = await response.json().catch(() => null);
+      toast.error(readTicketCreateError(payload));
       return;
     }
 
@@ -91,4 +92,23 @@ export function TicketForm() {
     </Card>
   );
 }
+function readTicketCreateError(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return "Ticket could not be created";
+  }
 
+  const error = "error" in payload ? payload.error : null;
+  if (typeof error === "string") {
+    return error;
+  }
+
+  if (error && typeof error === "object") {
+    const formErrors = "formErrors" in error && Array.isArray(error.formErrors) ? error.formErrors : [];
+    const fieldErrors = "fieldErrors" in error && error.fieldErrors && typeof error.fieldErrors === "object" ? error.fieldErrors : null;
+    const firstFieldError = fieldErrors ? Object.values(fieldErrors).flat().find((item) => typeof item === "string") : null;
+
+    return String(formErrors[0] ?? firstFieldError ?? "Ticket could not be created");
+  }
+
+  return "Ticket could not be created";
+}
