@@ -1,4 +1,8 @@
-﻿import { logger } from "@/lib/logger";
+import { loadEnvConfig } from "@next/env";
+
+loadEnvConfig(process.cwd());
+
+import { logger } from "@/lib/logger";
 import { refreshTrackedTicketWithBrowser } from "@/services/browser-tracker/refresh-ticket";
 
 async function main() {

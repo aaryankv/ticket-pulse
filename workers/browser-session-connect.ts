@@ -1,3 +1,7 @@
+import { loadEnvConfig } from "@next/env";
+
+loadEnvConfig(process.cwd());
+
 import { setTimeout as delay } from "node:timers/promises";
 import { logger } from "@/lib/logger";
 import { getBrowserSessionState, openOracleSsoPortals } from "@/services/browser-tracker/session";
@@ -6,12 +10,12 @@ async function main() {
   const keepOpenMinutes = Number(process.env.BROWSER_SESSION_CONNECT_MINUTES ?? 20);
   const state = getBrowserSessionState();
 
-  logger.info({ profileDir: state.profileDir }, "Opening Oracle portals for unified login");
+  logger.info({ connectionMode: state.connectionMode, cdpUrl: state.cdpUrl, profileDir: state.profileDir }, "Opening Oracle portals for unified login");
   const connection = await openOracleSsoPortals();
 
   logger.info(
     { keepOpenMinutes },
-    "Complete Oracle unified login in the opened browser. The browser profile will be reused by browser-worker."
+    "Complete Oracle unified login in the opened Edge window. The browser session will be reused by browser-worker."
   );
 
   await delay(keepOpenMinutes * 60_000);
