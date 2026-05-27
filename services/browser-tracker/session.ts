@@ -6,7 +6,7 @@ import { enterpriseSites } from "@/lib/external-links";
 import type { BrowserSessionState, BrowserTrackerOptions } from "@/services/browser-tracker/types";
 
 const defaultProfileDir = ".oracle-browser-profile";
-const defaultBrowserChannel = "chrome";
+const defaultBrowserChannel = "msedge";
 
 export function getBrowserProfileDir() {
   return path.resolve(process.env.BROWSER_PROFILE_DIR ?? defaultProfileDir);

@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const localBrowserChannel = process.env.PLAYWRIGHT_BROWSER_CHANNEL ?? (process.env.CI ? undefined : "chrome");
+const localBrowserChannel = process.env.PLAYWRIGHT_BROWSER_CHANNEL ?? (process.env.CI ? undefined : "msedge");
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -13,8 +13,8 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"], channel: localBrowserChannel }
+      name: "msedge",
+      use: { ...devices["Desktop Edge"], channel: localBrowserChannel }
     }
   ],
   webServer: {

@@ -127,10 +127,11 @@ Useful environment values:
 ```bash
 BROWSER_PROFILE_DIR=".oracle-browser-profile"
 BROWSER_HEADLESS="false"
-BROWSER_CHANNEL="chrome"
+BROWSER_CHANNEL="msedge"
 BROWSER_EXECUTABLE_PATH=""
 BROWSER_SESSION_CONNECT_MINUTES="20"
 BROWSER_WORKER_INTERVAL_MINUTES="30"
+PLAYWRIGHT_BROWSER_CHANNEL="msedge"
 ```
 
-If Playwright cannot download Chromium on the corporate network, install/use Microsoft Edge or Chrome and set either `BROWSER_CHANNEL="chrome"` or `BROWSER_EXECUTABLE_PATH` to the browser executable.
+Ticket Pulse defaults to installed Microsoft Edge for local browser tracking. If Edge channel detection fails, set `BROWSER_EXECUTABLE_PATH` to the Edge executable, for example `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`.
