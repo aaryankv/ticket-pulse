@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertSameOrigin } from "@/lib/csrf";
+import { isDatabaseReachable } from "@/lib/database-status";
 import { isDatabaseUnavailable } from "@/lib/local-ticket-store";
 import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rate-limit";
@@ -23,6 +24,10 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
+  if (!(await isDatabaseReachable())) {
+    return refreshLocalOrNotFound(id, user.id);
+  }
+
   try {
     const ticket = await prisma.trackedTicket.findFirst({
       where: { id, ownerId: user.id },
@@ -36,11 +41,14 @@ export async function POST(request: NextRequest, { params }: Params) {
     const result = await refreshTrackedTicketWithBrowser(id);
     return NextResponse.json(result);
   } catch (error) {
-    if (!isDatabaseUnavailable(error)) {
-      throw error;
+    if (isDatabaseUnavailable(error)) {
+      return refreshLocalOrNotFound(id, user.id);
     }
 
-    return refreshLocalOrNotFound(id, user.id);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Browser refresh failed" },
+      { status: 500 }
+    );
   }
 }
 

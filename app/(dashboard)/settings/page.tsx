@@ -1,12 +1,18 @@
 import { CheckCircle2, KeyRound, Plug, ShieldCheck, TriangleAlert } from "lucide-react";
 import { BrowserSessionPanel } from "@/components/settings/browser-session-panel";
+import { JiraProfileForm, type JiraProfileState } from "@/components/settings/jira-profile-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { auth } from "@/lib/auth";
+import { isDatabaseReachable } from "@/lib/database-status";
+import { getLocalJiraProfile } from "@/lib/local-jira-profile-store";
 import { prisma } from "@/lib/prisma";
 
 export default async function SettingsPage() {
   const session = await auth();
-  const connection = await getConnectionStatus(session?.user.id);
+  const [connection, jiraProfile] = await Promise.all([
+    getConnectionStatus(session?.user.id),
+    getJiraProfile(session?.user.id)
+  ]);
 
   return (
     <div className="space-y-6">
@@ -23,7 +29,7 @@ export default async function SettingsPage() {
         <SettingCard
           icon={KeyRound}
           title="External tokens"
-          description="Support, Bug Oracle, and Jira credentials are modeled as encrypted OAuth-ready credentials. Oracle SSO tokens can also be used for delegated polling."
+          description="Jira uses an encrypted personal access token for REST API refreshes. Oracle SSO tokens can still support other delegated polling."
         />
         <SettingCard
           icon={Plug}
@@ -31,6 +37,7 @@ export default async function SettingsPage() {
           description="Polling now attempts live Oracle Support, Jira, and Bug Oracle fetches when an Oracle SSO/API token is available. Otherwise it records an auth-required event."
         />
       </div>
+      <JiraProfileForm initialProfile={jiraProfile} />
       <BrowserSessionPanel />
       <Card>
         <CardHeader>
@@ -41,7 +48,7 @@ export default async function SettingsPage() {
           <ConnectionItem label="Oracle SSO" connected={connection.oracleSsoConnected} detail="Used as the fallback delegated token." />
           <ConnectionItem label="Oracle Support" connected={connection.supportOracleConnected} detail="SR activity page polling." />
           <ConnectionItem label="Bug Oracle" connected={connection.bugOracleConnected} detail="Bug detail page polling." />
-          <ConnectionItem label="Oracle Jira" connected={connection.jiraConnected} detail="Jira REST API, then page fallback." />
+          <ConnectionItem label="Oracle Jira" connected={connection.jiraConnected} detail="Jira REST API with personal access token." />
         </CardContent>
       </Card>
     </div>
@@ -85,12 +92,22 @@ function ConnectionItem({ label, connected, detail }: { label: string; connected
 }
 
 async function getConnectionStatus(userId?: string) {
-  if (!userId || !process.env.DATABASE_URL) {
+  if (!userId) {
     return {
       oracleSsoConnected: false,
       supportOracleConnected: false,
       bugOracleConnected: false,
       jiraConnected: false
+    };
+  }
+
+  if (!(await isDatabaseReachable())) {
+    const jiraProfile = await getLocalJiraProfile(userId);
+    return {
+      oracleSsoConnected: false,
+      supportOracleConnected: false,
+      bugOracleConnected: false,
+      jiraConnected: jiraProfile.connected
     };
   }
 
@@ -117,7 +134,7 @@ async function getConnectionStatus(userId?: string) {
       oracleSsoConnected,
       supportOracleConnected: oracleSsoConnected || connectedSystems.has("SUPPORT_ORACLE"),
       bugOracleConnected: oracleSsoConnected || connectedSystems.has("BUG_ORACLE"),
-      jiraConnected: oracleSsoConnected || connectedSystems.has("JIRA")
+      jiraConnected: connectedSystems.has("JIRA")
     };
   } catch {
     return {
@@ -126,6 +143,54 @@ async function getConnectionStatus(userId?: string) {
       bugOracleConnected: false,
       jiraConnected: false
     };
+  }
+}
+
+async function getJiraProfile(userId?: string): Promise<JiraProfileState> {
+  const fallback = {
+    connected: false,
+    username: "",
+    baseUrl: process.env.JIRA_API_BASE_URL ?? "https://jira.oraclecorp.com/jira",
+    updatedAt: null
+  };
+
+  if (!userId) {
+    return fallback;
+  }
+
+  if (!(await isDatabaseReachable())) {
+    return getLocalJiraProfile(userId);
+  }
+
+  try {
+    const credential = await prisma.externalCredential.findUnique({
+      where: {
+        userId_system: {
+          userId,
+          system: "JIRA"
+        }
+      }
+    });
+
+    if (!credential) {
+      return fallback;
+    }
+
+    const metadata =
+      credential.metadata && typeof credential.metadata === "object" && !Array.isArray(credential.metadata)
+        ? credential.metadata
+        : {};
+    const metadataUsername = typeof metadata.username === "string" ? metadata.username : "";
+    const metadataBaseUrl = typeof metadata.baseUrl === "string" ? metadata.baseUrl : fallback.baseUrl;
+
+    return {
+      connected: Boolean(credential.encryptedAccessToken),
+      username: credential.providerAccountId ?? metadataUsername,
+      baseUrl: metadataBaseUrl,
+      updatedAt: credential.updatedAt.toISOString()
+    };
+  } catch {
+    return fallback;
   }
 }
 

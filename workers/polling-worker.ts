@@ -3,7 +3,7 @@ import { logger } from "@/lib/logger";
 import { refreshDuePollingJobs } from "@/services/polling/refresh-ticket";
 import { generateWeeklyReportsForEligibleUsers } from "@/services/reports/weekly-report";
 
-const intervalMinutes = Number(process.env.POLLING_INTERVAL_MINUTES ?? 30);
+const intervalMinutes = Number(process.env.POLLING_INTERVAL_MINUTES ?? 60);
 const cronExpression = intervalMinutes <= 1 ? "* * * * *" : `*/${intervalMinutes} * * * *`;
 
 logger.info({ cronExpression }, "Ticket Pulse polling worker started");

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { auth } from "@/lib/auth";
+import { isDatabaseReachable } from "@/lib/database-status";
 import { prisma } from "@/lib/prisma";
 
 export default async function AdminPage() {
@@ -41,7 +42,7 @@ export default async function AdminPage() {
 }
 
 async function getStats() {
-  if (!process.env.DATABASE_URL) {
+  if (!(await isDatabaseReachable())) {
     return { users: 1, tickets: 4, jobs: 4, events: 12 };
   }
 

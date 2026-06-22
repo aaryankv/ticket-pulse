@@ -180,7 +180,7 @@ export async function getLocalTicketDetails(id: string, ownerId: string) {
 export async function updateLocalTicket(input: {
   id: string;
   ownerId: string;
-  patch: Partial<Pick<LocalTicketRecord, "status" | "priority" | "assignee" | "resolution" | "slaDueAt" | "dueDate" | "currentRisk" | "lastSyncedAt" | "externalLinks">>;
+  patch: Partial<Pick<LocalTicketRecord, "title" | "status" | "priority" | "assignee" | "resolution" | "slaDueAt" | "dueDate" | "currentRisk" | "lastSyncedAt" | "externalLinks">>;
   changes: LocalTicketChange[];
 }) {
   const store = await readStore();
@@ -204,6 +204,21 @@ export async function updateLocalTicket(input: {
   return updated;
 }
 
+export async function deleteLocalTicket(id: string, ownerId: string) {
+  const store = await readStore();
+  const index = store.tickets.findIndex((ticket) => ticket.id === id && ticket.ownerId === ownerId);
+
+  if (index < 0) {
+    return false;
+  }
+
+  store.tickets.splice(index, 1);
+  store.events = store.events.filter((event) => event.ticketId !== id);
+  await writeStore(store);
+
+  return true;
+}
+
 export function toDashboardTicket(ticket: LocalTicketRecord): DashboardTicket {
   return {
     id: ticket.id,
@@ -216,6 +231,7 @@ export function toDashboardTicket(ticket: LocalTicketRecord): DashboardTicket {
     assignee: ticket.assignee,
     currentRisk: ticket.currentRisk,
     lastSyncedAt: ticket.lastSyncedAt,
+    externalLinks: ticket.externalLinks,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
     agingDays: daysBetween(new Date(ticket.createdAt))

@@ -1,4 +1,4 @@
-import type { RiskLevel, TicketPriority } from "@prisma/client";
+import type { RiskLevel, TicketPriority, TicketSystem } from "@prisma/client";
 
 export type DashboardTicket = {
   id: string;
@@ -11,6 +11,7 @@ export type DashboardTicket = {
   assignee: string | null;
   currentRisk: RiskLevel;
   lastSyncedAt: string | null;
+  externalLinks?: unknown;
   createdAt: string;
   updatedAt: string;
   agingDays: number;
@@ -35,4 +36,26 @@ export type TimelineItem = {
   newValue: string | null;
   message: string;
   createdAt: string;
+};
+
+export type SystemComment = {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+};
+
+export type SystemSnapshotDetail = {
+  system: TicketSystem;
+  status: string | null;
+  priority: string | null;
+  assignee: string | null;
+  resolution: string | null;
+  dueDate: string | null;
+  slaDueAt: string | null;
+  fetchedAt: string;
+  webUrl?: string;
+  source?: string;
+  textSample?: string;
+  comments: SystemComment[];
 };

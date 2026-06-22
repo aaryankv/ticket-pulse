@@ -31,6 +31,11 @@ export const notificationPreferenceSchema = z.object({
   mutedFields: z.array(z.string()).default([])
 });
 
+export const jiraProfileSchema = z.object({
+  username: z.string().trim().email(),
+  personalAccessToken: z.string().trim().optional().or(z.literal(""))
+});
+
 export const ticketFilterSchema = z.object({
   query: z.string().optional(),
   status: z.string().optional(),

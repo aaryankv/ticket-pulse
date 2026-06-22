@@ -22,11 +22,12 @@ export async function pageToExternalTicket(input: {
   id: string;
   webUrl: string;
 }): Promise<ExternalTicket> {
-  await waitForTicketPageAfterRedirect(input.page, input.webUrl);
+  await waitForTicketPageAfterRedirect(input.page, input);
   await assertLoggedIn(input.page, input.system, input.webUrl);
 
   const title = await input.page.title().catch(() => "");
   const text = normalizeText(await input.page.locator("body").innerText({ timeout: 5_000 }).catch(() => ""));
+  assertTicketPage(input, title, text);
 
   return {
     id: input.id,
@@ -50,15 +51,27 @@ export async function pageToExternalTicket(input: {
   };
 }
 
-async function waitForTicketPageAfterRedirect(page: Page, webUrl: string) {
-  const expectedHost = new URL(webUrl).hostname.toLowerCase();
+async function waitForTicketPageAfterRedirect(page: Page, input: { system: TicketSystem; id: string; webUrl: string }) {
+  const expectedHost = new URL(input.webUrl).hostname.toLowerCase();
   const deadline = Date.now() + 60_000;
 
   while (Date.now() < deadline) {
     const url = page.url().toLowerCase();
     if (url.includes(expectedHost) && !isLoginUrl(url) && !url.startsWith("chrome-error://")) {
+      if (urlMatchesTicket(url, input.system, input.id)) {
+        return;
+      }
+
+      const text = normalizeText(await page.locator("body").innerText({ timeout: 1_500 }).catch(() => "")).toLowerCase();
+      if (text.includes(input.id.toLowerCase())) {
+        return;
+      }
+    }
+
+    if (isLoginUrl(url)) {
       return;
     }
+
     await page.waitForTimeout(500);
   }
 }
@@ -85,6 +98,49 @@ async function assertLoggedIn(page: Page, system: TicketSystem, webUrl: string) 
 
 function isLoginUrl(url: string) {
   return url.includes("login") || url.includes("signin") || url.includes("/oauth2/") || url.includes("identity.oraclecloud.com");
+}
+
+function assertTicketPage(input: { page: Page; system: TicketSystem; id: string; webUrl: string }, title: string, text: string) {
+  const id = input.id.toLowerCase();
+  if (urlMatchesTicket(input.page.url().toLowerCase(), input.system, input.id) || title.toLowerCase().includes(id) || text.toLowerCase().includes(id)) {
+    return;
+  }
+
+  throw new BrowserPageUnavailableError(
+    input.system,
+    input.webUrl,
+    `The browser loaded ${input.page.url()} but the page does not contain ticket ${input.id}. Check the exact link saved on the ticket.`
+  );
+}
+
+function urlMatchesTicket(currentUrl: string, system: TicketSystem, idValue: string) {
+  try {
+    const url = new URL(currentUrl);
+    const id = idValue.toLowerCase();
+    switch (system) {
+      case "SUPPORT_ORACLE":
+        return readSearchParam(url, "SR") === id || readSearchParam(url, "srNumber") === id || url.pathname.toLowerCase().includes(id);
+      case "BUG_ORACLE":
+        return readSearchParam(url, "rptno") === id || readSearchParam(url, "bugno") === id || url.pathname.toLowerCase().includes(id);
+      default:
+        return false;
+    }
+  } catch {
+    const current = currentUrl.toLowerCase();
+    const id = encodeURIComponent(idValue).toLowerCase();
+    return current.includes(`sr=${id}`) || current.includes(`srnumber=${id}`) || current.includes(`rptno=${id}`) || current.includes(`bugno=${id}`);
+  }
+}
+
+function readSearchParam(url: URL, name: string) {
+  const expected = name.toLowerCase();
+  for (const [key, value] of url.searchParams.entries()) {
+    if (key.toLowerCase() === expected) {
+      return value.trim().toLowerCase();
+    }
+  }
+
+  return "";
 }
 
 function extractStatus(system: TicketSystem, text: string) {

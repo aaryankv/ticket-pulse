@@ -1,6 +1,6 @@
 import type { TicketPriority, TicketSystem } from "@prisma/client";
 import type { BrowserContext, Page } from "playwright";
-import { buildExternalLinks, buildExternalLinksJson } from "@/lib/external-links";
+import { buildExternalLinksJson } from "@/lib/external-links";
 import {
   getLocalTicketRecord,
   toDashboardTicket,
@@ -8,19 +8,23 @@ import {
   type LocalTicketChange,
   type LocalTicketRecord
 } from "@/lib/local-ticket-store";
+import { getLocalJiraAccessToken } from "@/lib/local-jira-profile-store";
 import { daysBetween } from "@/lib/utils";
 import { BrowserSsoRequiredError, pageToExternalTicket } from "@/services/browser-tracker/parser";
-import { openOracleBrowserConnection, openUrlInTicketPulseWindow } from "@/services/browser-tracker/session";
+import { openOracleBrowserConnection } from "@/services/browser-tracker/session";
+import { jiraAdapter } from "@/services/jira";
 import { calculateRisk } from "@/services/risk";
 
 type LocalBrowserTarget = {
   system: TicketSystem;
   externalId: string;
   url: string;
+  urls: string[];
 };
 
 type BrowserObservedTicket = {
   system: TicketSystem;
+  title?: string | null;
   status: string;
   priority: string | null | undefined;
   assignee: string | null | undefined;
@@ -39,16 +43,25 @@ export async function refreshLocalTicketWithBrowser(id: string, ownerId: string)
     return null;
   }
 
-  const targets = getLocalBrowserTargets(ticket);
-  const connection = await openOracleBrowserConnection({ headless: false });
-
   const results: TargetRefreshResult[] = [];
-  try {
-    for (const target of targets) {
-      results.push(await refreshTarget(connection.context, target, connection.source !== "existing-edge"));
+  if (ticket.jiraId) {
+    results.push(await refreshLocalJiraTarget(ticket.jiraId, ownerId));
+  }
+
+  const targets = getLocalBrowserTargets(ticket);
+  const missingLinkFailures = getMissingLocalBrowserLinkFailures(ticket, targets);
+  results.push(...missingLinkFailures.map((failure) => ({ failure })));
+
+  if (targets.length > 0) {
+    const connection = await openOracleBrowserConnection({ headless: false });
+
+    try {
+      for (const target of targets) {
+        results.push(await refreshTarget(connection.context, target, connection.source !== "existing-edge"));
+      }
+    } finally {
+      await connection.close();
     }
-  } finally {
-    await connection.close();
   }
 
   const observed = results.flatMap((result) => (result.observed ? [result.observed] : []));
@@ -57,7 +70,7 @@ export async function refreshLocalTicketWithBrowser(id: string, ownerId: string)
   const changes = buildLocalChanges(ticket, aggregate);
   const failureChanges = failures.map((message): LocalTicketChange => ({
     system: null,
-    changedField: "browserSession",
+    changedField: "refresh",
     previousValue: null,
     newValue: "FETCH_FAILED",
     message
@@ -68,6 +81,7 @@ export async function refreshLocalTicketWithBrowser(id: string, ownerId: string)
     ownerId,
     patch: {
       status: aggregate.status,
+      title: aggregate.title,
       priority: aggregate.priority,
       assignee: aggregate.assignee,
       resolution: aggregate.resolution,
@@ -80,7 +94,7 @@ export async function refreshLocalTicketWithBrowser(id: string, ownerId: string)
         status: aggregate.status
       }),
       lastSyncedAt: observed.length > 0 ? new Date().toISOString() : ticket.lastSyncedAt,
-      externalLinks: buildExternalLinksJson(ticket)
+      externalLinks: ticket.externalLinks ?? buildExternalLinksJson(ticket)
     },
     changes: changes.length > 0 || failureChanges.length > 0
       ? [...changes, ...failureChanges]
@@ -90,7 +104,7 @@ export async function refreshLocalTicketWithBrowser(id: string, ownerId: string)
             changedField: "refresh",
             previousValue: null,
             newValue: "NO_CHANGES",
-            message: "Browser refresh completed with no detected ticket changes"
+            message: "Refresh completed with no detected ticket changes"
           }
         ]
   });
@@ -105,6 +119,45 @@ export async function refreshLocalTicketWithBrowser(id: string, ownerId: string)
     failures,
     storage: "local-file"
   };
+}
+
+async function refreshLocalJiraTarget(jiraId: string, ownerId: string): Promise<TargetRefreshResult> {
+  try {
+    const accessToken = await getLocalJiraAccessToken(ownerId);
+    if (!accessToken) {
+      return { failure: "Oracle Jira API profile is not connected" };
+    }
+
+    const context = {
+      userId: ownerId,
+      system: "JIRA" as TicketSystem,
+      mode: "live" as const,
+      authSource: "external-credential" as const,
+      accessToken,
+      scopes: ["jira:read"]
+    };
+    const externalTicket = await jiraAdapter.fetchTicket(jiraId, context);
+    const comments = await jiraAdapter.fetchComments(jiraId, context);
+    const normalized = jiraAdapter.normalizeResponse({
+      ...externalTicket,
+      comments: comments.length > 0 ? comments : externalTicket.comments
+    });
+
+    return {
+      observed: {
+        system: "JIRA",
+        status: normalized.status,
+        title: readNormalizedTitle(normalized.payload),
+        priority: normalized.priority,
+        assignee: normalized.assignee,
+        resolution: normalized.resolution,
+        slaDueAt: normalized.slaDueAt,
+        dueDate: normalized.dueDate
+      }
+    };
+  } catch (error) {
+    return { failure: `Oracle Jira API refresh failed: ${error instanceof Error ? error.message : "Unknown error"}` };
+  }
 }
 
 async function refreshTarget(context: BrowserContext, target: LocalBrowserTarget, allowNewPage: boolean): Promise<TargetRefreshResult> {
@@ -164,40 +217,72 @@ async function readExternalTicketFromPage(context: BrowserContext, target: Local
 }
 
 async function getTargetPage(context: BrowserContext, target: LocalBrowserTarget, allowNewPage: boolean): Promise<{ page: Page; shouldClose: boolean; atTargetUrl: boolean }> {
-  const pages = context.pages();
   const exactTicketPage = findExactTargetPage(context, target);
   if (exactTicketPage) {
     return { page: exactTicketPage, shouldClose: false, atTargetUrl: true };
   }
 
-  for (const page of pages) {
-    if (await pageMatchesSystem(page, target.system)) {
-      return { page, shouldClose: false, atTargetUrl: false };
-    }
-  }
-
   if (!allowNewPage) {
-    return { page: await openUrlInTicketPulseWindow(context, target.url), shouldClose: false, atTargetUrl: false };
+    return { page: await context.newPage(), shouldClose: false, atTargetUrl: false };
   }
 
   return { page: await context.newPage(), shouldClose: true, atTargetUrl: false };
 }
 
 async function forceRefreshTargetPage(page: Page, target: LocalBrowserTarget, atTargetUrl: boolean) {
-  // Exact ticket tabs reload. Generic system tabs navigate to the linked ticket and stay open.
-  try {
-    if (atTargetUrl) {
+  let lastError: unknown;
+
+  if (atTargetUrl) {
+    try {
       await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
-    } else {
-      await page.goto(target.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    }
-  } catch (error) {
-    if (!isRecoverableNavigationAbort(error) || !urlMatchesTarget(page.url(), target)) {
-      throw error;
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+      if (await pageLooksLikeTarget(page, target)) {
+        return;
+      }
+    } catch (error) {
+      if (!isRecoverableNavigationAbort(error) || !urlMatchesTarget(page.url(), target)) {
+        lastError = error;
+      }
     }
   }
 
-  await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+  for (const url of target.urls) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+      if (await pageLooksLikeTarget(page, target) || isLoginUrl(page.url())) {
+        return;
+      }
+    } catch (error) {
+      if (!isRecoverableNavigationAbort(error) || !urlMatchesTarget(page.url(), target)) {
+        lastError = error;
+      }
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+}
+
+async function pageLooksLikeTarget(page: Page, target: LocalBrowserTarget) {
+  if (urlMatchesTarget(page.url(), target)) {
+    return true;
+  }
+
+  const id = target.externalId.toLowerCase();
+  const title = (await page.title().catch(() => "")).toLowerCase();
+  if (title.includes(id)) {
+    return true;
+  }
+
+  const text = (await page.locator("body").innerText({ timeout: 3_000 }).catch(() => "")).toLowerCase();
+  return text.includes(id);
+}
+
+function isLoginUrl(url: string) {
+  const current = url.toLowerCase();
+  return current.includes("login") || current.includes("signin") || current.includes("/oauth2/") || current.includes("identity.oraclecloud.com");
 }
 
 function isRecoverableNavigationAbort(error: unknown) {
@@ -209,62 +294,94 @@ function findExactTargetPage(context: BrowserContext, target: LocalBrowserTarget
 }
 
 function urlMatchesTarget(currentUrl: string, target: LocalBrowserTarget) {
-  const current = currentUrl.toLowerCase();
-  const id = encodeURIComponent(target.externalId).toLowerCase();
+  try {
+    const current = new URL(currentUrl);
+    const host = current.hostname.toLowerCase();
+    const id = target.externalId.toLowerCase();
 
-  switch (target.system) {
-    case "SUPPORT_ORACLE":
-      return current.includes("support.oracle.com") && current.includes(`sr=${id}`);
-    case "BUG_ORACLE":
-      return current.includes("bug.oraclecorp.com") && current.includes(`rptno=${id}`);
-    case "JIRA":
-      return current.includes("jira.oraclecorp.com") && current.includes(`/browse/${id}`);
-    default:
-      return false;
+    switch (target.system) {
+      case "SUPPORT_ORACLE":
+        return host.includes("support.oracle.com") && (
+          readSearchParam(current, "SR") === id ||
+          readSearchParam(current, "srNumber") === id ||
+          current.pathname.toLowerCase().includes(id)
+        );
+      case "BUG_ORACLE":
+        return host.includes("bug.oraclecorp.com") && (
+          readSearchParam(current, "rptno") === id ||
+          readSearchParam(current, "bugno") === id ||
+          current.pathname.toLowerCase().includes(id)
+        );
+      default:
+        return false;
+    }
+  } catch {
+    const current = currentUrl.toLowerCase();
+    const id = encodeURIComponent(target.externalId).toLowerCase();
+
+    switch (target.system) {
+      case "SUPPORT_ORACLE":
+        return current.includes("support.oracle.com") && (current.includes(`sr=${id}`) || current.includes(`srnumber=${id}`));
+      case "BUG_ORACLE":
+        return current.includes("bug.oraclecorp.com") && (current.includes(`rptno=${id}`) || current.includes(`bugno=${id}`));
+      default:
+        return false;
+    }
   }
 }
 
-async function pageMatchesSystem(page: Page, system: TicketSystem) {
-  const host = systemHost(system);
-  if (!host) {
-    return false;
+function readSearchParam(url: URL, name: string) {
+  const expected = name.toLowerCase();
+  for (const [key, value] of url.searchParams.entries()) {
+    if (key.toLowerCase() === expected) {
+      return value.trim().toLowerCase();
+    }
   }
 
-  const currentUrl = page.url().toLowerCase();
-  if (currentUrl.includes(host)) {
-    return true;
-  }
-
-  const title = (await page.title().catch(() => "")).toLowerCase();
-  return title.includes(host);
+  return "";
 }
 
-function systemHost(system: TicketSystem) {
-  switch (system) {
-    case "SUPPORT_ORACLE":
-      return "support.oracle.com";
-    case "BUG_ORACLE":
-      return "bug.oraclecorp.com";
-    case "JIRA":
-      return "jira.oraclecorp.com";
-    default:
-      return null;
-  }
-}
+function getLocalBrowserTargets(ticket: Pick<LocalTicketRecord, "supportTicketId" | "bugId" | "jiraId" | "externalLinks">): LocalBrowserTarget[] {
+  const supportUrl = ticket.supportTicketId ? readStoredTicketUrl(ticket.externalLinks, "supportOracle") : null;
+  const bugUrl = ticket.bugId ? readStoredTicketUrl(ticket.externalLinks, "bugOracle") : null;
 
-function getLocalBrowserTargets(ticket: Pick<LocalTicketRecord, "supportTicketId" | "bugId" | "jiraId">): LocalBrowserTarget[] {
-  const links = buildExternalLinks(ticket);
   return [
-    ticket.supportTicketId && links.supportOracle?.ticketUrl
-      ? { system: "SUPPORT_ORACLE" as TicketSystem, externalId: ticket.supportTicketId, url: links.supportOracle.ticketUrl }
+    ticket.supportTicketId && supportUrl
+      ? { system: "SUPPORT_ORACLE" as TicketSystem, externalId: ticket.supportTicketId, url: supportUrl, urls: [supportUrl] }
       : null,
-    ticket.bugId && links.bugOracle?.ticketUrl
-      ? { system: "BUG_ORACLE" as TicketSystem, externalId: ticket.bugId, url: links.bugOracle.ticketUrl }
-      : null,
-    ticket.jiraId && links.jira?.ticketUrl
-      ? { system: "JIRA" as TicketSystem, externalId: ticket.jiraId, url: links.jira.ticketUrl }
+    ticket.bugId && bugUrl
+      ? { system: "BUG_ORACLE" as TicketSystem, externalId: ticket.bugId, url: bugUrl, urls: [bugUrl] }
       : null
   ].filter(Boolean) as LocalBrowserTarget[];
+}
+
+function getMissingLocalBrowserLinkFailures(
+  ticket: Pick<LocalTicketRecord, "supportTicketId" | "bugId" | "externalLinks">,
+  targets: LocalBrowserTarget[]
+) {
+  const targetSystems = new Set(targets.map((target) => target.system));
+  return [
+    ticket.supportTicketId && !targetSystems.has("SUPPORT_ORACLE")
+      ? `${formatSystem("SUPPORT_ORACLE")} browser refresh needs the exact URL pasted during ticket creation. This older ticket does not have a saved user-provided link, so Ticket Pulse will not open a generated portal URL.`
+      : null,
+    ticket.bugId && !targetSystems.has("BUG_ORACLE")
+      ? `${formatSystem("BUG_ORACLE")} browser refresh needs the exact URL pasted during ticket creation. This older ticket does not have a saved user-provided link, so Ticket Pulse will not open a generated portal URL.`
+      : null
+  ].filter(Boolean) as string[];
+}
+
+function readStoredTicketUrl(externalLinks: unknown, key: "supportOracle" | "bugOracle") {
+  if (!externalLinks || typeof externalLinks !== "object" || Array.isArray(externalLinks)) {
+    return null;
+  }
+
+  const value = (externalLinks as Record<string, unknown>)[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const ticketUrl = (value as Record<string, unknown>).ticketUrl;
+  return typeof ticketUrl === "string" && ticketUrl.trim() ? ticketUrl.trim() : null;
 }
 
 function aggregateLocalTicketState(observed: BrowserObservedTicket[], current: LocalTicketRecord) {
@@ -277,6 +394,7 @@ function aggregateLocalTicketState(observed: BrowserObservedTicket[], current: L
   const primaryStatus = primary?.status;
 
   return {
+    title: jira?.title ?? current.title,
     status: statusSource?.status ?? (primaryStatus && primaryStatus !== "UNKNOWN" ? primaryStatus : current.status),
     priority: highestPriority(observed.map((ticket) => normalizePriority(ticket.priority)).concat(current.priority)),
     assignee: jira?.assignee ?? bug?.assignee ?? support?.assignee ?? current.assignee,
@@ -287,7 +405,7 @@ function aggregateLocalTicketState(observed: BrowserObservedTicket[], current: L
 }
 
 function buildLocalChanges(current: LocalTicketRecord, next: ReturnType<typeof aggregateLocalTicketState>): LocalTicketChange[] {
-  const fields: Array<keyof typeof next> = ["status", "priority", "assignee", "resolution", "slaDueAt", "dueDate"];
+  const fields: Array<keyof typeof next> = ["title", "status", "priority", "assignee", "resolution", "slaDueAt", "dueDate"];
 
   return fields.flatMap((field) => {
     const previousValue = current[field] ? String(current[field]) : null;
@@ -303,7 +421,7 @@ function buildLocalChanges(current: LocalTicketRecord, next: ReturnType<typeof a
         changedField: field,
         previousValue,
         newValue,
-        message: `Browser refresh changed ${formatField(field)} from ${previousValue ?? "empty"} to ${newValue ?? "empty"}`
+        message: `Refresh changed ${formatField(field)} from ${previousValue ?? "empty"} to ${newValue ?? "empty"}`
       }
     ];
   });
@@ -352,4 +470,8 @@ function formatSystem(system: TicketSystem) {
 
 function formatField(value: string) {
   return value.replace(/([A-Z])/g, " $1").toLowerCase();
+}
+
+function readNormalizedTitle(payload: Record<string, unknown>) {
+  return typeof payload.summary === "string" && payload.summary.trim() ? payload.summary.trim() : null;
 }

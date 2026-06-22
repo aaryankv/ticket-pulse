@@ -1,16 +1,22 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, TicketSnapshot, TicketSystem } from "@prisma/client";
+import { isDatabaseReachable } from "@/lib/database-status";
 import { prisma } from "@/lib/prisma";
 import { getLocalTicketDetails, isDatabaseUnavailable, listLocalTickets } from "@/lib/local-ticket-store";
 import { demoMetrics, demoTickets, demoTimeline, findDemoTicket } from "@/lib/demo-data";
 import { daysBetween } from "@/lib/utils";
-import type { DashboardMetrics, DashboardTicket, TimelineItem } from "@/types/ticket";
+import type { DashboardMetrics, DashboardTicket, SystemComment, SystemSnapshotDetail, TimelineItem } from "@/types/ticket";
 
 export async function getDashboardData(userId?: string): Promise<{
   tickets: DashboardTicket[];
   metrics: DashboardMetrics;
 }> {
-  if (!process.env.DATABASE_URL || !userId) {
+  if (!userId) {
     return fallbackDashboardData();
+  }
+
+  if (!(await isDatabaseReachable())) {
+    const local = await listLocalTickets(userId);
+    return { tickets: local.tickets, metrics: buildMetrics(local.tickets) };
   }
 
   try {
@@ -31,6 +37,7 @@ export async function getDashboardData(userId?: string): Promise<{
       assignee: ticket.assignee,
       currentRisk: ticket.currentRisk,
       lastSyncedAt: ticket.lastSyncedAt?.toISOString() ?? null,
+      externalLinks: ticket.externalLinks,
       createdAt: ticket.createdAt.toISOString(),
       updatedAt: ticket.updatedAt.toISOString(),
       agingDays: daysBetween(ticket.createdAt)
@@ -51,8 +58,12 @@ export async function getDashboardData(userId?: string): Promise<{
 }
 
 export async function getTicketDetails(id: string, userId?: string) {
-  if (!process.env.DATABASE_URL || !userId) {
+  if (!userId) {
     return fallbackTicketDetails(id);
+  }
+
+  if (!(await isDatabaseReachable())) {
+    return getLocalTicketDetails(id, userId);
   }
 
   try {
@@ -86,6 +97,7 @@ export async function getTicketDetails(id: string, userId?: string) {
         assignee: ticket.assignee,
         currentRisk: ticket.currentRisk,
         lastSyncedAt: ticket.lastSyncedAt?.toISOString() ?? null,
+        externalLinks: ticket.externalLinks,
         createdAt: ticket.createdAt.toISOString(),
         updatedAt: ticket.updatedAt.toISOString(),
         agingDays: daysBetween(ticket.createdAt)
@@ -98,7 +110,8 @@ export async function getTicketDetails(id: string, userId?: string) {
         newValue: event.newValue,
         message: event.message,
         createdAt: event.createdAt.toISOString()
-      }))
+      })),
+      systemDetails: buildSystemDetails(ticket.snapshots)
     };
   } catch (error) {
     if (isDatabaseUnavailable(error) && userId) {
@@ -107,6 +120,65 @@ export async function getTicketDetails(id: string, userId?: string) {
 
     return fallbackTicketDetails(id);
   }
+}
+
+function buildSystemDetails(snapshots: TicketSnapshot[]): SystemSnapshotDetail[] {
+  const latestBySystem = new Map<TicketSystem, TicketSnapshot>();
+
+  for (const snapshot of snapshots) {
+    if (!latestBySystem.has(snapshot.system)) {
+      latestBySystem.set(snapshot.system, snapshot);
+    }
+  }
+
+  return Array.from(latestBySystem.values()).map((snapshot) => {
+    const payload = asRecord(snapshot.payload);
+    const normalized = asRecord(snapshot.normalized);
+
+    return {
+      system: snapshot.system,
+      status: snapshot.status,
+      priority: snapshot.priority,
+      assignee: snapshot.assignee,
+      resolution: snapshot.resolution,
+      slaDueAt: snapshot.slaDueAt?.toISOString() ?? null,
+      dueDate: snapshot.dueDate?.toISOString() ?? null,
+      fetchedAt: snapshot.fetchedAt.toISOString(),
+      webUrl: stringValue(payload.webUrl) ?? stringValue(normalized.webUrl) ?? undefined,
+      source: stringValue(payload.source) ?? stringValue(normalized.source) ?? undefined,
+      textSample: stringValue(payload.extractedTextSample) ?? undefined,
+      comments: readComments(payload.comments)
+    };
+  });
+}
+
+function readComments(value: unknown): SystemComment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item, index) => {
+    const comment = asRecord(item);
+    const body = stringValue(comment.body);
+    if (!body) {
+      return [];
+    }
+
+    return {
+      id: stringValue(comment.id) ?? `comment-${index}`,
+      author: stringValue(comment.author) ?? "Unknown",
+      body,
+      createdAt: stringValue(comment.createdAt) ?? new Date().toISOString()
+    };
+  });
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function fallbackDashboardData() {

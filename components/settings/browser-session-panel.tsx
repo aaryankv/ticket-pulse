@@ -57,7 +57,7 @@ export function BrowserSessionPanel() {
         </div>
         <CardTitle>Local browser tracker</CardTitle>
         <CardDescription>
-          Attaches to Microsoft Edge so scheduled checks can reuse your saved Oracle unified login session.
+          Attaches to Microsoft Edge for Oracle pages that still require a saved unified login session.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -77,7 +77,6 @@ export function BrowserSessionPanel() {
             Connect Oracle session
           </Button>
           <PortalButton href="https://support.oracle.com/support/?page=sptemplate&sptemplate=service-request" label="Oracle Support" />
-          <PortalButton href="https://jira.oraclecorp.com/" label="Jira" />
           <PortalButton href="https://bug.oraclecorp.com/ords/bug/bugui/home" label="Bug DB" />
         </div>
       </CardContent>

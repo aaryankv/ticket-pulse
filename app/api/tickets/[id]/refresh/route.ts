@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertSameOrigin } from "@/lib/csrf";
+import { isDatabaseReachable } from "@/lib/database-status";
 import { isDatabaseUnavailable } from "@/lib/local-ticket-store";
 import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rate-limit";
@@ -28,6 +29,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   const { id } = await params;
+
+  if (!(await isDatabaseReachable())) {
+    return refreshLocalOrNotFound(id, user.id);
+  }
 
   try {
     const ticket = await prisma.trackedTicket.findFirst({

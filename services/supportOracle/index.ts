@@ -85,7 +85,10 @@ export const supportOracleAdapter: TicketAdapter = {
       slaDueAt: ticket.slaDueAt,
       dueDate: ticket.dueDate,
       commentsHash: hashComments(ticket.comments),
-      payload: ticket.payload,
+      payload: {
+        ...ticket.payload,
+        comments: ticket.comments
+      },
       webUrl: ticket.webUrl,
       normalized: {
         status: ticket.rawStatus,

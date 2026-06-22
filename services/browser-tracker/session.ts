@@ -14,7 +14,6 @@ const defaultCdpUrl = "http://127.0.0.1:9222";
 function getPortalUrls() {
   return [
     enterpriseSites.supportOracle.portalUrl,
-    enterpriseSites.jira.portalUrl,
     enterpriseSites.bugOracle.portalUrl
   ];
 }
@@ -44,8 +43,14 @@ export function getBrowserSessionState(): BrowserSessionState {
 export async function prepareBrowserSession() {
   const cdpUrl = getBrowserCdpUrl();
   if (cdpUrl) {
-    await ensureEdgeCdpAvailable(cdpUrl);
-    return;
+    try {
+      await ensureEdgeCdpAvailable(cdpUrl);
+      return;
+    } catch (error) {
+      if (process.env.BROWSER_CDP_STRICT === "true") {
+        throw error;
+      }
+    }
   }
 
   await mkdir(getBrowserProfileDir(), { recursive: true });
@@ -54,9 +59,19 @@ export async function prepareBrowserSession() {
 export async function openOracleBrowserConnection(options: BrowserTrackerOptions = {}): Promise<OracleBrowserConnection> {
   const cdpUrl = getBrowserCdpUrl();
   if (cdpUrl) {
-    return connectToExistingEdge(cdpUrl);
+    try {
+      return await connectToExistingEdge(cdpUrl);
+    } catch (error) {
+      if (process.env.BROWSER_CDP_STRICT === "true") {
+        throw error;
+      }
+    }
   }
 
+  return openManagedBrowserConnection(options);
+}
+
+async function openManagedBrowserConnection(options: BrowserTrackerOptions = {}): Promise<OracleBrowserConnection> {
   const profileDir = getBrowserProfileDir();
   await mkdir(profileDir, { recursive: true });
 
@@ -80,8 +95,10 @@ export async function openOracleSsoPortals() {
   const connection = await openOracleBrowserConnection({ headless: false });
   const pages: Page[] = [];
 
-  for (const url of getPortalUrls()) {
-    pages.push(await openPortal(connection.context, url));
+  if (process.env.BROWSER_OPEN_LOGIN_PORTALS === "true") {
+    for (const url of getPortalUrls()) {
+      pages.push(await openPortal(connection.context, url));
+    }
   }
 
   return { ...connection, pages };
@@ -139,8 +156,7 @@ function launchEdgeForCdp(cdpUrl: string) {
   const port = new URL(cdpUrl || defaultCdpUrl).port || "9222";
   const args = [
     `--remote-debugging-port=${port}`,
-    `--profile-directory=${process.env.EDGE_PROFILE_DIRECTORY || "Default"}`,
-    ...getPortalUrls()
+    `--profile-directory=${process.env.EDGE_PROFILE_DIRECTORY || "Default"}`
   ];
 
   spawn(executable, args, {
@@ -179,7 +195,7 @@ function buildCdpUnavailableMessage(cdpUrl: string) {
 }
 
 async function openPortal(context: BrowserContext, url: string): Promise<Page> {
-  const existing = findPageForHost(context, url);
+  const existing = findPageForRequestedUrl(context, url);
   if (existing) {
     return existing;
   }
@@ -220,11 +236,11 @@ export async function openUrlInTicketPulseWindow(context: BrowserContext, url: s
   await opener.evaluate((id) => document.getElementById(id)?.remove(), linkId).catch(() => undefined);
 
   const popup = await popupPromise;
-  let page = popup ?? findPageForHost(context, url);
+  let page = popup ?? findPageForRequestedUrl(context, url);
 
   if (!page) {
     await openUrlAsTabWithCdp(context, opener, url);
-    page = await waitForPageForHost(context, url);
+    page = await waitForPageForRequestedUrl(context, url);
   }
 
   if (!page) {
@@ -244,11 +260,11 @@ async function openUrlAsTabWithCdp(context: BrowserContext, opener: Page, url: s
   }
 }
 
-async function waitForPageForHost(context: BrowserContext, url: string) {
+async function waitForPageForRequestedUrl(context: BrowserContext, url: string) {
   const deadline = Date.now() + 10_000;
 
   while (Date.now() < deadline) {
-    const page = findPageForHost(context, url);
+    const page = findPageForRequestedUrl(context, url);
     if (page) {
       return page;
     }
@@ -258,12 +274,43 @@ async function waitForPageForHost(context: BrowserContext, url: string) {
   return undefined;
 }
 
-function findPageForHost(context: BrowserContext, url: string) {
-  const host = new URL(url).hostname.toLowerCase();
-  return context.pages().find((page) => {
-    const pageUrl = page.url().toLowerCase();
-    return pageUrl.includes(host);
-  });
+function findPageForRequestedUrl(context: BrowserContext, url: string) {
+  return context.pages().find((page) => pageMatchesRequestedUrl(page.url(), url));
+}
+
+function pageMatchesRequestedUrl(currentUrl: string, requestedUrl: string) {
+  try {
+    const current = new URL(currentUrl);
+    const requested = new URL(requestedUrl);
+    if (current.hostname.toLowerCase() !== requested.hostname.toLowerCase()) {
+      return false;
+    }
+
+    const requestedSr = readSearchParam(requested, "SR");
+    if (requestedSr) {
+      return readSearchParam(current, "SR") === requestedSr;
+    }
+
+    const requestedBug = readSearchParam(requested, "rptno");
+    if (requestedBug) {
+      return readSearchParam(current, "rptno") === requestedBug;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readSearchParam(url: URL, name: string) {
+  const expected = name.toLowerCase();
+  for (const [key, value] of url.searchParams.entries()) {
+    if (key.toLowerCase() === expected) {
+      return value.trim().toLowerCase();
+    }
+  }
+
+  return "";
 }
 
 function findTicketPulsePage(context: BrowserContext) {

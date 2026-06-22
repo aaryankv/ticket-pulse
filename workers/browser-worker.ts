@@ -6,7 +6,7 @@ import cron from "node-cron";
 import { logger } from "@/lib/logger";
 import { refreshDueBrowserJobs } from "@/services/browser-tracker/refresh-ticket";
 
-const intervalMinutes = Number(process.env.BROWSER_WORKER_INTERVAL_MINUTES ?? process.env.POLLING_INTERVAL_MINUTES ?? 30);
+const intervalMinutes = Number(process.env.BROWSER_WORKER_INTERVAL_MINUTES ?? process.env.POLLING_INTERVAL_MINUTES ?? 60);
 const cronExpression = intervalMinutes <= 1 ? "* * * * *" : `*/${intervalMinutes} * * * *`;
 
 logger.info({ cronExpression }, "Ticket Pulse browser tracker worker started");

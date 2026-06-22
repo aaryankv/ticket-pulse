@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DeleteTicketButton } from "@/components/tickets/delete-ticket-button";
 import { ExternalTicketLink } from "@/components/tickets/external-ticket-link";
 import { PriorityBadge, RiskBadge, StatusBadge } from "@/components/tickets/status-badge";
 import { buildExternalLinks } from "@/lib/external-links";
@@ -78,7 +79,7 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
 
     void (async () => {
       for (const ticket of tickets) {
-        const response = await fetch(`/api/tickets/${ticket.id}/refresh-browser`, {
+        const response = await fetch(`/api/tickets/${ticket.id}/refresh`, {
           method: "POST",
           signal: controller.signal
         }).catch(() => null);
@@ -109,7 +110,9 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
 
     const payload = await response.json();
     if (payload.failures?.length) {
-      toast.warning(`Refresh finished with ${payload.failures.length} integration issue(s)`);
+      toast.warning(`Refresh finished with ${payload.failures.length} integration issue(s)`, {
+        description: payload.failures.slice(0, 2).join(" | ")
+      });
       router.refresh();
       return;
     }
@@ -127,13 +130,16 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
     setBrowserRefreshingId(null);
 
     if (!response.ok) {
-      toast.error("Browser refresh failed");
+      const payload = await response.json().catch(() => null);
+      toast.error(payload?.error ?? "Browser refresh failed");
       return;
     }
 
     const payload = await response.json();
     if (payload.failures?.length) {
-      toast.warning(`Browser refresh finished with ${payload.failures.length} issue(s)`);
+      toast.warning(`Browser refresh finished with ${payload.failures.length} issue(s)`, {
+        description: payload.failures.slice(0, 2).join(" | ")
+      });
       router.refresh();
       return;
     }
@@ -141,6 +147,7 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
     toast.success(`Browser refresh complete: ${payload.changes?.length ?? 0} change(s) detected`);
     router.refresh();
   }
+
   return (
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-[1fr_160px_160px_180px_auto]">
@@ -211,12 +218,13 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
               <TableHead>Last Updated</TableHead>
               <TableHead>Aging</TableHead>
               <TableHead>Risk Level</TableHead>
-              <TableHead className="w-28">Actions</TableHead>
+              <TableHead className="w-56">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {visible.map((ticket) => {
               const links = buildExternalLinks(ticket);
+              const hasBrowserTargets = Boolean(ticket.supportTicketId || ticket.bugId);
 
               return (
               <TableRow key={ticket.id}>
@@ -255,7 +263,7 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
                   <RiskBadge risk={ticket.currentRisk} />
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-2">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -266,16 +274,19 @@ export function TicketTable({ tickets }: { tickets: DashboardTicket[] }) {
                     >
                       <RefreshCw className={refreshingId === ticket.id ? "animate-spin" : ""} />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => browserRefreshTicket(ticket.id)}
-                      disabled={browserRefreshingId === ticket.id}
-                      aria-label={`Browser refresh ${ticket.jiraId ?? ticket.supportTicketId ?? ticket.id}`}
-                      title="Refresh with local Oracle browser session"
-                    >
-                      <MonitorCheck className={browserRefreshingId === ticket.id ? "animate-pulse" : ""} />
-                    </Button>
+                    {hasBrowserTargets ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => browserRefreshTicket(ticket.id)}
+                        disabled={browserRefreshingId === ticket.id}
+                        aria-label={`Browser refresh ${ticket.supportTicketId ?? ticket.bugId ?? ticket.id}`}
+                        title="Refresh Oracle Support/Bug DB with local browser session"
+                      >
+                        <MonitorCheck className={browserRefreshingId === ticket.id ? "animate-pulse" : ""} />
+                      </Button>
+                    ) : null}
+                    <DeleteTicketButton ticketId={ticket.id} ticketLabel={ticket.jiraId ?? ticket.bugId ?? ticket.supportTicketId ?? ticket.title} />
                   </div>
                 </TableCell>
               </TableRow>

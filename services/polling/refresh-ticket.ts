@@ -18,7 +18,7 @@ type LinkedSystem = {
 };
 
 export async function createPollingJobForTicket(ticketId: string, intervalMinutes?: number) {
-  const interval = intervalMinutes ?? Number(process.env.POLLING_INTERVAL_MINUTES ?? 30);
+  const interval = intervalMinutes ?? Number(process.env.POLLING_INTERVAL_MINUTES ?? 60);
 
   return prisma.pollingJob.upsert({
     where: { jobKey: `ticket:${ticketId}` },
@@ -133,13 +133,14 @@ export async function refreshTrackedTicket(ticketId: string) {
   const updatedTicket = await prisma.trackedTicket.update({
     where: { id: ticket.id },
     data: {
+      title: aggregate.title ?? ticket.title,
       status: aggregate.status,
       priority: aggregate.priority,
       assignee: aggregate.assignee,
       resolution: aggregate.resolution,
       slaDueAt: aggregate.slaDueAt,
       dueDate: aggregate.dueDate,
-      externalLinks: buildExternalLinksJson(ticket),
+      externalLinks: ticket.externalLinks ?? buildExternalLinksJson(ticket),
       currentRisk: calculateRisk({
         priority: aggregate.priority,
         agingDays: daysBetween(ticket.createdAt),
@@ -154,7 +155,7 @@ export async function refreshTrackedTicket(ticketId: string) {
     where: { ticketId: ticket.id },
     data: {
       lastRunAt: new Date(),
-      nextRunAt: new Date(Date.now() + Number(process.env.POLLING_INTERVAL_MINUTES ?? 30) * 60_000),
+      nextRunAt: new Date(Date.now() + Number(process.env.POLLING_INTERVAL_MINUTES ?? 60) * 60_000),
       status: "ACTIVE",
       errorMessage: failures.length > 0 ? failures.join(" | ") : null
     }
@@ -215,8 +216,6 @@ function getLinkedSystems(ticket: {
   jiraId: string | null;
 }): LinkedSystem[] {
   return [
-    ticket.supportTicketId ? { system: "SUPPORT_ORACLE" as TicketSystem, externalId: ticket.supportTicketId } : null,
-    ticket.bugId ? { system: "BUG_ORACLE" as TicketSystem, externalId: ticket.bugId } : null,
     ticket.jiraId ? { system: "JIRA" as TicketSystem, externalId: ticket.jiraId } : null
   ].filter(Boolean) as LinkedSystem[];
 }
@@ -224,6 +223,7 @@ function getLinkedSystems(ticket: {
 function aggregateTicketState(
   normalizedTickets: NormalizedTicket[],
   currentTicket: {
+    title: string | null;
     priority: TicketPriority;
     status: string;
     assignee: string | null;
@@ -241,6 +241,7 @@ function aggregateTicketState(
   );
 
   return {
+    title: readNormalizedTitle(jira) ?? currentTicket.title,
     status: primary?.status ?? currentTicket.status,
     priority,
     assignee: jira?.assignee ?? bug?.assignee ?? support?.assignee ?? currentTicket.assignee,
@@ -248,6 +249,11 @@ function aggregateTicketState(
     slaDueAt: firstDate(normalizedTickets.map((ticket) => ticket.slaDueAt)) ?? currentTicket.slaDueAt,
     dueDate: firstDate(normalizedTickets.map((ticket) => ticket.dueDate)) ?? currentTicket.dueDate
   };
+}
+
+function readNormalizedTitle(ticket?: NormalizedTicket) {
+  const summary = ticket?.payload.summary;
+  return typeof summary === "string" && summary.trim() ? summary.trim() : null;
 }
 
 function buildIntegrationFailure(system: TicketSystem, error: unknown): TicketChange {

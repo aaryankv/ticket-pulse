@@ -137,4 +137,4 @@ BROWSER_WORKER_INTERVAL_MINUTES="30"
 PLAYWRIGHT_BROWSER_CHANNEL="msedge"
 ```
 
-Ticket Pulse defaults to Microsoft Edge attach mode. If Edge channel detection fails, set `EDGE_EXECUTABLE_PATH` to the Edge executable, for example `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`.
+Ticket Pulse defaults to Microsoft Edge attach mode. Keep an Edge window started with `--remote-debugging-port=9222` open so the tracker can reuse your existing Oracle login. If Edge channel detection fails, set `EDGE_EXECUTABLE_PATH` to the Edge executable, for example `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`.
